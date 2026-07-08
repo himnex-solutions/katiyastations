@@ -24,21 +24,29 @@ async function main() {
     },
   });
 
-  const superAdminEmail = process.env.SEED_SUPER_ADMIN_EMAIL ?? 'admin@katiyastation.com';
-  const superAdminPassword = process.env.SEED_SUPER_ADMIN_PASSWORD ?? 'ChangeMe123!';
+  // ── Super admins ──────────────────────────────────────────
+  // `update` re-applies the password/role on every seed run, so re-seeding
+  // reliably resets these accounts (unlike an empty update, which leaves an
+  // existing user's password untouched).
+  const superAdmins = [
+    { email: 'yadavakash2290@gmail.com', fullName: 'Aakash Yadav', password: 'katiya@2026#' },
+    { email: 'himnexsolutions.np@gmail.com', fullName: 'Himnex Solutions', password: 'katiya@2026#' },
+  ];
 
-  const passwordHash = await argon2.hash(superAdminPassword);
-  await prisma.user.upsert({
-    where: { email: superAdminEmail },
-    update: {},
-    create: {
-      email: superAdminEmail,
-      passwordHash,
-      fullName: 'System Administrator',
-      role: 'super_admin',
-      isActive: true,
-    },
-  });
+  for (const admin of superAdmins) {
+    const passwordHash = await argon2.hash(admin.password);
+    await prisma.user.upsert({
+      where: { email: admin.email },
+      update: { passwordHash, role: 'super_admin', isActive: true },
+      create: {
+        email: admin.email,
+        passwordHash,
+        fullName: admin.fullName,
+        role: 'super_admin',
+        isActive: true,
+      },
+    });
+  }
 
   const branchManagerPasswordHash = await argon2.hash('ChangeMe123!');
   await prisma.user.upsert({
@@ -101,8 +109,10 @@ async function main() {
   }
   // eslint-disable-next-line no-console
   console.log('Seed complete.');
-  // eslint-disable-next-line no-console
-  console.log(`Super admin login: ${superAdminEmail} / ${superAdminPassword}`);
+  for (const admin of superAdmins) {
+    // eslint-disable-next-line no-console
+    console.log(`Super admin login: ${admin.email} / ${admin.password}`);
+  }
 }
 main()
   .catch((error) => {
