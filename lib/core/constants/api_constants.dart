@@ -7,17 +7,18 @@ class ApiConstants {
   ApiConstants._();
 
   // ── Base URLs ──────────────────────────────────────────────
-  // Change this to your VPS domain/IP once deployed
-  // Development: http://localhost:3000
+  // Domain/host ONLY (no /api/v1 — that's appended below via apiVersion,
+  // so apiBase resolves to https://api.katiyastation.com/api/v1).
+  // Override per build with:  --dart-define=API_BASE_URL=http://localhost:3000
   // Production:  https://api.katiyastation.com
   static const String baseUrl = String.fromEnvironment(
     'API_BASE_URL',
-    defaultValue: 'http://localhost:3000',
+    defaultValue: 'https://api.katiyastation.com',
   );
 
   static const String wsUrl = String.fromEnvironment(
     'WS_BASE_URL',
-    defaultValue: 'http://localhost:3000',
+    defaultValue: 'https://api.katiyastation.com',
   );
 
   static const String apiVersion = '/api/v1';
