@@ -33,8 +33,16 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
   String _filter = 'all';
   String _search = '';
   PlutoGridStateManager? _gridManager;
+  Map<String, InventoryItem> _itemsById = {};
 
   List<PlutoColumn> get _columns => [
+    PlutoColumn(
+      title: 'ID',
+      field: 'id',
+      type: PlutoColumnType.text(),
+      width: 100,
+      hide: true,
+    ),
     PlutoColumn(
       title: 'Item Name',
       field: 'name',
@@ -113,19 +121,121 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
         );
       },
     ),
+    PlutoColumn(
+      title: 'Actions',
+      field: 'actions',
+      type: PlutoColumnType.text(),
+      width: 120,
+      enableEditingMode: false,
+      enableSorting: false,
+      enableColumnDrag: false,
+      enableContextMenu: false,
+      enableFilterMenuItem: false,
+      titleTextAlign: PlutoColumnTextAlign.center,
+      renderer: (ctx) {
+        final id = ctx.row.cells['id']?.value as String?;
+        final item = id == null ? null : _itemsById[id];
+        if (item == null) return const SizedBox.shrink();
+        return Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            IconButton(
+              icon: const Icon(Icons.add_box_rounded, size: 18, color: AppColors.success),
+              tooltip: 'Restock',
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(),
+              onPressed: () => _showAdjustDialog(item, restock: true),
+            ),
+            const SizedBox(width: 6),
+            PopupMenuButton<String>(
+              icon: const Icon(Icons.more_vert_rounded, size: 18, color: AppColors.textSecondary),
+              padding: EdgeInsets.zero,
+              onSelected: (v) {
+                switch (v) {
+                  case 'reduce':
+                    _showAdjustDialog(item, restock: false);
+                    break;
+                  case 'edit':
+                    _showEditDialog(item);
+                    break;
+                  case 'delete':
+                    _deleteItem(item);
+                    break;
+                }
+              },
+              itemBuilder: (_) => const [
+                PopupMenuItem(value: 'reduce', child: Text('Reduce / Waste')),
+                PopupMenuItem(value: 'edit', child: Text('Edit item')),
+                PopupMenuItem(value: 'delete', child: Text('Delete', style: TextStyle(color: AppColors.error))),
+              ],
+            ),
+          ],
+        );
+      },
+    ),
   ];
 
   List<PlutoRow> _buildRows(List<InventoryItem> items) {
+    _itemsById = {for (final it in items) it.id: it};
     return items.map((item) {
       final status = item.isOut ? 'out' : item.isLow ? 'low' : 'ok';
       return PlutoRow(cells: {
+        'id': PlutoCell(value: item.id),
         'name': PlutoCell(value: item.name),
         'unit': PlutoCell(value: item.unit),
         'stock': PlutoCell(value: item.currentStock),
         'reorder': PlutoCell(value: item.reorderLevel),
         'status': PlutoCell(value: status),
+        'actions': PlutoCell(value: ''),
       });
     }).toList();
+  }
+
+  // ── Stock actions ──────────────────────────────────────────
+  Future<void> _showAdjustDialog(InventoryItem item, {required bool restock}) async {
+    final changed = await showDialog<bool>(
+      context: context,
+      builder: (_) => _AdjustStockDialog(item: item, restock: restock),
+    );
+    if (changed == true) ref.invalidate(inventoryProvider);
+  }
+
+  Future<void> _showEditDialog(InventoryItem item) async {
+    final changed = await showDialog<bool>(
+      context: context,
+      builder: (_) => _EditItemDialog(item: item),
+    );
+    if (changed == true) ref.invalidate(inventoryProvider);
+  }
+
+  Future<void> _deleteItem(InventoryItem item) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete Item'),
+        content: Text(
+          'Remove "${item.name}" from inventory? Past stock movements are kept for reporting. This cannot be undone.',
+          style: GoogleFonts.outfit(fontSize: 13, color: AppColors.textSecondary, height: 1.4),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: AppColors.error, foregroundColor: Colors.white),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    try {
+      await ApiClient.instance.delete(ApiConstants.inventoryById(item.id));
+      ref.invalidate(inventoryProvider);
+      messenger.showSnackBar(SnackBar(content: Text('${item.name} deleted.'), backgroundColor: AppColors.success));
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text('Error: $e'), backgroundColor: AppColors.error));
+    }
   }
 
   @override
@@ -266,6 +376,11 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
                 }
 
                 return PlutoGrid(
+                  // Rebuild the grid when stock/reorder values change so live
+                  // updates and edits are reflected (PlutoGrid caches its rows).
+                  key: ValueKey(Object.hashAll([
+                    for (final i in filtered) '${i.id}:${i.currentStock}:${i.reorderLevel}',
+                  ])),
                   columns: _columns,
                   rows: _buildRows(filtered),
                   onLoaded: (e) {
@@ -355,4 +470,233 @@ class _SChip extends StatelessWidget {
     decoration: BoxDecoration(color: color.withValues(alpha: 0.08), borderRadius: BorderRadius.circular(8), border: Border.all(color: color.withValues(alpha: 0.2))),
     child: Text('$label: $value', style: GoogleFonts.outfit(fontSize: 12, color: color, fontWeight: FontWeight.w500)),
   );
+}
+
+String _trimNum(double v) => v % 1 == 0 ? v.toInt().toString() : v.toString();
+
+// ═══════════════════════════════════════════════════════════════════════
+//  ADJUST STOCK DIALOG — restock (in) / consume (out) / waste
+//  Posts to /inventory/:id/adjust, which records a stock_movement and
+//  re-checks the reorder level (firing a low-stock alert if crossed).
+// ═══════════════════════════════════════════════════════════════════════
+class _AdjustStockDialog extends StatefulWidget {
+  final InventoryItem item;
+  final bool restock;
+  const _AdjustStockDialog({required this.item, required this.restock});
+  @override
+  State<_AdjustStockDialog> createState() => _AdjustStockDialogState();
+}
+
+class _AdjustStockDialogState extends State<_AdjustStockDialog> {
+  final _qtyCtrl = TextEditingController();
+  final _reasonCtrl = TextEditingController();
+  late String _type = widget.restock ? 'in' : 'out';
+  bool _submitting = false;
+  String? _error;
+
+  static const _types = [
+    ['in', 'Add'],
+    ['out', 'Remove'],
+    ['waste', 'Waste'],
+  ];
+
+  @override
+  void dispose() {
+    _qtyCtrl.dispose();
+    _reasonCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    final qty = double.tryParse(_qtyCtrl.text.trim());
+    if (qty == null || qty <= 0) {
+      setState(() => _error = 'Enter a quantity greater than 0');
+      return;
+    }
+    setState(() {
+      _submitting = true;
+      _error = null;
+    });
+    try {
+      await ApiClient.instance.post(
+        ApiConstants.adjustStock(widget.item.id),
+        data: {
+          'type': _type,
+          'quantity': qty,
+          if (_reasonCtrl.text.trim().isNotEmpty) 'reason': _reasonCtrl.text.trim(),
+        },
+      );
+      if (mounted) Navigator.pop(context, true);
+    } catch (e) {
+      setState(() {
+        _submitting = false;
+        _error = 'Error: $e';
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final qty = double.tryParse(_qtyCtrl.text.trim()) ?? 0;
+    final projected = _type == 'in' ? widget.item.currentStock + qty : widget.item.currentStock - qty;
+
+    return AlertDialog(
+      title: Text(widget.restock ? 'Restock ${widget.item.name}' : 'Adjust ${widget.item.name}'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Current: ${_trimNum(widget.item.currentStock)} ${widget.item.unit}',
+              style: GoogleFonts.outfit(fontSize: 12, color: AppColors.textSecondary)),
+          const SizedBox(height: 14),
+          Wrap(spacing: 8, children: [
+            for (final t in _types)
+              ChoiceChip(
+                label: Text(t[1]),
+                selected: _type == t[0],
+                onSelected: (_) => setState(() => _type = t[0]),
+              ),
+          ]),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _qtyCtrl,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            autofocus: true,
+            decoration: InputDecoration(labelText: 'Quantity (${widget.item.unit}) *'),
+            onChanged: (_) => setState(() {}),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _reasonCtrl,
+            decoration: const InputDecoration(labelText: 'Reason / note'),
+          ),
+          const SizedBox(height: 12),
+          Text('New stock: ${_trimNum(projected)} ${widget.item.unit}',
+              style: GoogleFonts.outfit(
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+                color: projected <= widget.item.reorderLevel ? AppColors.warning : AppColors.success,
+              )),
+          if (_error != null) ...[
+            const SizedBox(height: 8),
+            Text(_error!, style: const TextStyle(color: AppColors.error, fontSize: 12)),
+          ],
+        ],
+      ),
+      actions: [
+        TextButton(onPressed: _submitting ? null : () => Navigator.pop(context), child: const Text('Cancel')),
+        ElevatedButton(
+          onPressed: _submitting ? null : _submit,
+          child: _submitting
+              ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+              : const Text('Save'),
+        ),
+      ],
+    );
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  EDIT ITEM DIALOG — name, unit, reorder level, cost per unit
+// ═══════════════════════════════════════════════════════════════════════
+class _EditItemDialog extends StatefulWidget {
+  final InventoryItem item;
+  const _EditItemDialog({required this.item});
+  @override
+  State<_EditItemDialog> createState() => _EditItemDialogState();
+}
+
+class _EditItemDialogState extends State<_EditItemDialog> {
+  late final _nameCtrl = TextEditingController(text: widget.item.name);
+  late final _unitCtrl = TextEditingController(text: widget.item.unit);
+  late final _reorderCtrl = TextEditingController(text: _trimNum(widget.item.reorderLevel));
+  late final _costCtrl =
+      TextEditingController(text: widget.item.costPerUnit != null ? _trimNum(widget.item.costPerUnit!) : '');
+  bool _submitting = false;
+  String? _error;
+
+  @override
+  void dispose() {
+    _nameCtrl.dispose();
+    _unitCtrl.dispose();
+    _reorderCtrl.dispose();
+    _costCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    if (_nameCtrl.text.trim().isEmpty || _unitCtrl.text.trim().isEmpty) {
+      setState(() => _error = 'Name and unit are required');
+      return;
+    }
+    setState(() {
+      _submitting = true;
+      _error = null;
+    });
+    try {
+      await ApiClient.instance.patch(
+        ApiConstants.inventoryById(widget.item.id),
+        data: {
+          'name': _nameCtrl.text.trim(),
+          'unit': _unitCtrl.text.trim(),
+          'reorderLevel': double.tryParse(_reorderCtrl.text.trim()) ?? widget.item.reorderLevel,
+          if (_costCtrl.text.trim().isNotEmpty) 'costPerUnit': double.tryParse(_costCtrl.text.trim()),
+        },
+      );
+      if (mounted) Navigator.pop(context, true);
+    } catch (e) {
+      setState(() {
+        _submitting = false;
+        _error = 'Error: $e';
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Edit Inventory Item'),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(controller: _nameCtrl, decoration: const InputDecoration(labelText: 'Item Name *')),
+            const SizedBox(height: 12),
+            TextField(controller: _unitCtrl, decoration: const InputDecoration(labelText: 'Unit (kg, litre, piece...) *')),
+            const SizedBox(height: 12),
+            Row(children: [
+              Expanded(
+                child: TextField(
+                  controller: _reorderCtrl,
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  decoration: const InputDecoration(labelText: 'Reorder Level'),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: TextField(
+                  controller: _costCtrl,
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  decoration: const InputDecoration(labelText: 'Cost / Unit'),
+                ),
+              ),
+            ]),
+            if (_error != null) ...[
+              const SizedBox(height: 12),
+              Text(_error!, style: const TextStyle(color: AppColors.error, fontSize: 12)),
+            ],
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(onPressed: _submitting ? null : () => Navigator.pop(context), child: const Text('Cancel')),
+        ElevatedButton(
+          onPressed: _submitting ? null : _submit,
+          child: _submitting
+              ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+              : const Text('Save'),
+        ),
+      ],
+    );
+  }
 }

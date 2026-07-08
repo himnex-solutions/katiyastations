@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_web_plugins/url_strategy.dart';
 import 'package:responsive_framework/responsive_framework.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
@@ -21,6 +22,11 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // ── Clean web URLs (no #) ──────────────────────────────────
+  // Path URL strategy: localhost:5548/dashboard instead of /#/dashboard.
+  // No-op on Android/iOS/desktop, so it's safe to call unconditionally.
+  usePathUrlStrategy();
 
   // ── 1. Initialize Dio API Client ──────────────────────────
   ApiClient.instance.initialize();
