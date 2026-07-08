@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:typed_data';
+// ignore_for_file: deprecated_member_use  // DropdownButtonFormField.value kept for Flutter 3.32.0 web build
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_animate/flutter_animate.dart';
@@ -256,7 +257,7 @@ class _SuperAdminPortalState extends ConsumerState<SuperAdminPortal>
                 ),
                 const SizedBox(height: 16),
                 DropdownButtonFormField<String>(
-                  initialValue: selectedRole,
+                  value: selectedRole,
                   decoration: const InputDecoration(
                       labelText: 'Role *', prefixIcon: Icon(Icons.badge_outlined)),
                   items: const [
@@ -274,7 +275,7 @@ class _SuperAdminPortalState extends ConsumerState<SuperAdminPortal>
                   loading: () => const LinearProgressIndicator(),
                   error: (_, __) => const SizedBox(),
                   data: (branches) => DropdownButtonFormField<String>(
-                    initialValue: selectedBranchId,
+                    value: selectedBranchId,
                     decoration: const InputDecoration(
                         labelText: 'Assign Branch', prefixIcon: Icon(Icons.store_outlined)),
                     hint: const Text('Select branch'),
@@ -371,7 +372,7 @@ class _SuperAdminPortalState extends ConsumerState<SuperAdminPortal>
               ),
               const SizedBox(height: 12),
               DropdownButtonFormField<String>(
-                initialValue: selectedRole,
+                value: selectedRole,
                 decoration: const InputDecoration(labelText: 'Role'),
                 items: const [
                   DropdownMenuItem(value: 'branch_manager', child: Text('Branch Manager')),
@@ -388,7 +389,7 @@ class _SuperAdminPortalState extends ConsumerState<SuperAdminPortal>
                 loading: () => const LinearProgressIndicator(),
                 error: (_, __) => const SizedBox(),
                 data: (branches) => DropdownButtonFormField<String>(
-                  initialValue: selectedBranchId,
+                  value: selectedBranchId,
                   decoration: const InputDecoration(labelText: 'Branch'),
                   hint: const Text('Select branch'),
                   items: branches.map((b) => DropdownMenuItem<String>(
@@ -1014,7 +1015,7 @@ class _MenuImportTabState extends ConsumerState<_MenuImportTab> {
                   loading: () => const LinearProgressIndicator(color: AppColors.primary),
                   error: (e, _) => Text('Error loading branches: $e', style: const TextStyle(color: AppColors.error)),
                   data: (branches) => DropdownButtonFormField<String>(
-                    initialValue: _selectedBranchId,
+                    value: _selectedBranchId,
                     decoration: const InputDecoration(
                       prefixIcon: Icon(Icons.store_outlined, size: 20),
                       hintText: 'Choose branch to import menu into',

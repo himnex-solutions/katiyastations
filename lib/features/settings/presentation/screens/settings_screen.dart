@@ -217,7 +217,7 @@ class _PrinterSettingsCardState extends ConsumerState<_PrinterSettingsCard> {
         // Auto-print toggle — this makes the device a KOT print station.
         SwitchListTile(
           contentPadding: EdgeInsets.zero,
-          activeThumbColor: AppColors.primary,
+          thumbColor: const WidgetStatePropertyAll(AppColors.primary),
           value: cfg.autoPrintKot,
           onChanged: (supported && cfg.configured)
               ? (v) => ref.read(printerConfigProvider.notifier).setAutoPrint(v)
@@ -378,7 +378,7 @@ class _PrinterSetupSheetState extends State<_PrinterSetupSheet> {
               Row(children: [
                 Text('Use BLE (Bluetooth LE)', style: GoogleFonts.outfit(fontSize: 12, color: AppColors.textPrimary)),
                 const Spacer(),
-                Switch(value: _isBle, activeThumbColor: AppColors.primary, onChanged: (v) => setState(() => _isBle = v)),
+                Switch(value: _isBle, thumbColor: const WidgetStatePropertyAll(AppColors.primary), onChanged: (v) => setState(() => _isBle = v)),
               ]),
             ],
 

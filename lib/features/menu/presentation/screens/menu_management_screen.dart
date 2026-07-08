@@ -1,4 +1,5 @@
 import 'package:dio/dio.dart';
+// ignore_for_file: deprecated_member_use  // DropdownButtonFormField.value kept for Flutter 3.32.0 web build
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_animate/flutter_animate.dart';
@@ -806,7 +807,7 @@ class _MenuManagementScreenState extends ConsumerState<MenuManagementScreen> {
               ),
               const SizedBox(height: 14),
               DropdownButtonFormField<String>(
-                initialValue: type,
+                value: type,
                 decoration: _premiumFieldDecoration(
                     label: 'Type', icon: Icons.tune_rounded),
                 onChanged: (v) => set(() => type = v!),
@@ -1473,9 +1474,8 @@ class _MenuItemCard extends StatelessWidget {
                           child: Switch(
                             value: available,
                             onChanged: (_) => _toggleAvailability(context),
-                            activeThumbColor: Colors.white,
+                            thumbColor: const WidgetStatePropertyAll(Colors.white),
                             activeTrackColor: AppColors.success,
-                            inactiveThumbColor: Colors.white,
                             inactiveTrackColor: const Color(0xFFCBD2D9),
                             materialTapTargetSize:
                                 MaterialTapTargetSize.shrinkWrap,

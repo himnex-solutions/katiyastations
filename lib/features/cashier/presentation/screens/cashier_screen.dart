@@ -1731,7 +1731,7 @@ class _CashierScreenState extends ConsumerState<CashierScreen>
         Switch(
           value: value,
           onChanged: onChanged,
-          activeThumbColor: valueColor,
+          thumbColor: WidgetStatePropertyAll(valueColor),
           materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
         ),
       ],

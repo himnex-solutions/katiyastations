@@ -1,3 +1,4 @@
+// ignore_for_file: deprecated_member_use  // DropdownButtonFormField.value kept for Flutter 3.32.0 web build
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_animate/flutter_animate.dart';
@@ -268,7 +269,7 @@ class _AddPurchaseDialogState extends ConsumerState<_AddPurchaseDialog> {
                   );
                 }
                 return DropdownButtonFormField<String>(
-                  initialValue: _supplier?['id'] as String?,
+                  value: _supplier?['id'] as String?,
                   isExpanded: true,
                   decoration: const InputDecoration(labelText: 'Supplier *'),
                   hint: const Text('Select a supplier'),

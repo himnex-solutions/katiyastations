@@ -1,3 +1,4 @@
+// ignore_for_file: deprecated_member_use  // DropdownButtonFormField.value kept for Flutter 3.32.0 web build
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_animate/flutter_animate.dart';
@@ -154,7 +155,7 @@ class _ExpenseScreenState extends ConsumerState<ExpenseScreen> {
         TextField(controller: titleCtrl, decoration: const InputDecoration(labelText: 'Title *')),
         const SizedBox(height: 12),
         DropdownButtonFormField<String>(
-          initialValue: category,
+          value: category,
           decoration: const InputDecoration(labelText: 'Category'),
           onChanged: (v) => set(() => category = v!),
           items: _categories.map((c) => DropdownMenuItem(value: c, child: Text(c))).toList(),

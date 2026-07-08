@@ -1,3 +1,4 @@
+// ignore_for_file: deprecated_member_use  // DropdownButtonFormField.value kept for Flutter 3.32.0 web build
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -220,7 +221,7 @@ class _RecipeDialogState extends ConsumerState<RecipeDialog> {
                           Expanded(
                             flex: 3,
                             child: DropdownButtonFormField<String>(
-                              initialValue: _selectedInventoryItemId,
+                              value: _selectedInventoryItemId,
                               hint: const Text('Select ingredient'),
                               decoration: const InputDecoration(isDense: true, contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 8)),
                               items: _allInventoryItems.map((item) {

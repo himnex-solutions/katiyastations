@@ -1,3 +1,4 @@
+// ignore_for_file: deprecated_member_use  // DropdownButtonFormField.value kept for Flutter 3.32.0 web build
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_animate/flutter_animate.dart';
@@ -135,7 +136,7 @@ class BarScreen extends ConsumerWidget {
         TextField(controller: nameCtrl, decoration: const InputDecoration(labelText: 'Name (e.g. Old Monk Rum)')),
         const SizedBox(height: 12),
         DropdownButtonFormField<String>(
-          initialValue: category,
+          value: category,
           decoration: const InputDecoration(labelText: 'Category'),
           onChanged: (v) => set(() => category = v!),
           items: const [

@@ -1,3 +1,4 @@
+// ignore_for_file: deprecated_member_use  // DropdownButtonFormField.value kept for Flutter 3.32.0 web build
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_animate/flutter_animate.dart' hide ShimmerEffect;
@@ -439,7 +440,7 @@ class _AddStaffDialogState extends State<_AddStaffDialog> {
             ),
             const SizedBox(height: 16),
             DropdownButtonFormField<String>(
-              initialValue: _selectedUser?['id'] as String?,
+              value: _selectedUser?['id'] as String?,
               isExpanded: true,
               decoration: const InputDecoration(labelText: 'User Account (Email) *'),
               hint: const Text('Select a user'),
@@ -455,7 +456,7 @@ class _AddStaffDialogState extends State<_AddStaffDialog> {
             ),
             const SizedBox(height: 12),
             DropdownButtonFormField<String>(
-              initialValue: _role,
+              value: _role,
               decoration: const InputDecoration(labelText: 'Role'),
               onChanged: (v) => setState(() => _role = v!),
               items: const [
@@ -559,7 +560,7 @@ class _EditStaffDialogState extends State<_EditStaffDialog> {
             ),
             const SizedBox(height: 12),
             DropdownButtonFormField<String>(
-              initialValue: _role,
+              value: _role,
               decoration: const InputDecoration(labelText: 'Role'),
               onChanged: (v) => setState(() => _role = v!),
               items: const [
