@@ -29,4 +29,14 @@ class _StubThermalPrinter implements ThermalPrinter {
   Future<void> testPrint({required PrinterConfig config, Map<String, dynamic>? branch}) async {
     throw UnsupportedError('Thermal printing is not available on this platform');
   }
+
+  /// A browser can neither open a raw TCP socket nor enumerate USB devices,
+  /// so there is nothing to probe — say so rather than show a false negative.
+  @override
+  Future<PrinterProbe> probe(PrinterConfig config) async => PrinterProbe(
+        state: PrinterLinkState.unsupported,
+        checkedAt: DateTime.now(),
+        detail: 'The web app cannot reach a thermal printer. '
+            'Open Katiya Station on the Windows or Android device instead.',
+      );
 }

@@ -31,6 +31,11 @@ abstract class ThermalPrinter {
 
   /// Sends a short "printer connected" test slip.
   Future<void> testPrint({required PrinterConfig config, Map<String, dynamic>? branch});
+
+  /// Checks whether [config]'s printer is reachable *right now*, without
+  /// printing anything. Network opens and immediately closes a TCP socket;
+  /// USB and Bluetooth look for the saved device in a discovery scan.
+  Future<PrinterProbe> probe(PrinterConfig config);
 }
 
 ThermalPrinter? _instance;

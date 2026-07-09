@@ -6,6 +6,7 @@ import '../../../../core/constants/app_colors.dart';
 import '../../../../core/constants/app_constants.dart';
 import '../../../../core/constants/api_constants.dart';
 import '../../../../core/network/api_client.dart';
+import '../../../../core/printing/printer_status_pill.dart';
 import '../../../../core/utils/responsive_utils.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
 import 'package:flutter_animate/flutter_animate.dart';
@@ -301,6 +302,12 @@ class _CashierScreenState extends ConsumerState<CashierScreen>
         ],
       ),
       actions: [
+        // Live thermal-printer reachability for THIS till. Polled locally —
+        // the server has no visibility of a printer plugged in here.
+        Padding(
+          padding: const EdgeInsets.only(right: 8),
+          child: PrinterStatusPill(compact: context.isMobile),
+        ),
         tablesAsync.when(
           loading: () => const SizedBox(),
           error: (_, __) => const SizedBox(),

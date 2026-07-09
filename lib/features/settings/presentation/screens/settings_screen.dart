@@ -6,6 +6,7 @@ import '../../../../core/constants/app_colors.dart';
 import '../../../../core/utils/responsive_utils.dart';
 import '../../../../core/constants/app_constants.dart';
 import '../../../../core/printing/printer_config.dart';
+import '../../../../core/printing/printer_status_pill.dart';
 import '../../../../core/printing/thermal_printer.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
 import '../../../branches/presentation/providers/branch_provider.dart';
@@ -171,6 +172,12 @@ class _PrinterSettingsCardState extends ConsumerState<_PrinterSettingsCard> {
             ]),
           ),
         if (!supported) const SizedBox(height: 14),
+
+        // Live reachability — re-probed on a timer and whenever the config
+        // below changes, so this reflects the printer's state right now
+        // rather than the last time someone hit "Test print".
+        const PrinterStatusBanner(),
+        const SizedBox(height: 14),
 
         // Current printer summary
         Row(children: [

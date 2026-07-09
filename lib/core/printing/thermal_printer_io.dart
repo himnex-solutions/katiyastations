@@ -6,8 +6,9 @@
 // Only compiled where dart:io exists (see thermal_printer.dart).
 // ============================================================
 
-import 'dart:io' show Platform;
+import 'dart:io' show Platform, Socket, SocketException;
 
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:esc_pos_utils_plus/esc_pos_utils_plus.dart';
 import 'package:flutter_pos_printer_platform_image_3/flutter_pos_printer_platform_image_3.dart';
 import 'package:intl/intl.dart';
@@ -74,6 +75,155 @@ class _IoThermalPrinter implements ThermalPrinter {
   @override
   Future<void> testPrint({required PrinterConfig config, Map<String, dynamic>? branch}) async {
     await _send(config, await _buildTestBytes(config, branch));
+  }
+
+  // ── live connection check ─────────────────────────────────
+  //
+  // Deliberately never calls PrinterManager.connect(): on Bluetooth and USB
+  // that claims the device, which would fight with an in-flight KOT print.
+  // Each transport gets the cheapest honest probe available.
+
+  @override
+  Future<PrinterProbe> probe(PrinterConfig cfg) async {
+    final now = DateTime.now();
+
+    if (!supported) {
+      return PrinterProbe(
+        state: PrinterLinkState.unsupported,
+        checkedAt: now,
+        detail: 'This platform cannot drive a thermal printer.',
+      );
+    }
+    if (!cfg.configured) {
+      return PrinterProbe(
+        state: PrinterLinkState.notConfigured,
+        checkedAt: now,
+        detail: 'No printer has been set up on this device yet.',
+      );
+    }
+
+    return switch (cfg.kind) {
+      PrinterKind.network => _probeNetwork(cfg),
+      PrinterKind.usb => _probeUsb(cfg),
+      PrinterKind.bluetooth => _probeBluetooth(cfg),
+    };
+  }
+
+  /// Opens a TCP connection and drops it immediately — proves the printer is
+  /// listening on :port without sending a single byte of ESC/POS.
+  Future<PrinterProbe> _probeNetwork(PrinterConfig cfg) async {
+    try {
+      final socket = await Socket.connect(
+        cfg.address,
+        cfg.port,
+        timeout: const Duration(seconds: 2),
+      );
+      socket.destroy();
+      return PrinterProbe(
+        state: PrinterLinkState.connected,
+        kind: cfg.kind,
+        transport: 'Network · ${await _linkKind()}',
+        detail: '${cfg.address}:${cfg.port}',
+        checkedAt: DateTime.now(),
+      );
+    } on SocketException catch (e) {
+      // Socket.connect surfaces a timeout as a SocketException too.
+      return PrinterProbe(
+        state: PrinterLinkState.unreachable,
+        kind: cfg.kind,
+        transport: 'Network',
+        detail: '${cfg.address}:${cfg.port} — ${e.message}',
+        checkedAt: DateTime.now(),
+      );
+    }
+  }
+
+  /// Describes how *this device* reaches the LAN. The printer itself is just
+  /// an IP — nothing on the wire says whether it is cabled or wireless.
+  Future<String> _linkKind() async {
+    try {
+      final results = await Connectivity().checkConnectivity();
+      if (results.contains(ConnectivityResult.ethernet)) return 'Ethernet';
+      if (results.contains(ConnectivityResult.wifi)) return 'Wi-Fi';
+    } catch (_) {
+      // Fall through to the neutral label.
+    }
+    return 'LAN';
+  }
+
+  Future<PrinterProbe> _probeUsb(PrinterConfig cfg) async {
+    final devices = await discover(PrinterKind.usb);
+    for (final device in devices) {
+      if (_usbMatches(device, cfg)) {
+        return PrinterProbe(
+          state: PrinterLinkState.connected,
+          kind: cfg.kind,
+          transport: 'USB',
+          detail: device.name,
+          checkedAt: DateTime.now(),
+        );
+      }
+    }
+    return PrinterProbe(
+      state: PrinterLinkState.unreachable,
+      kind: cfg.kind,
+      transport: 'USB',
+      detail: devices.isEmpty
+          ? 'No USB printer is attached.'
+          : '“${cfg.target}” is not among the ${devices.length} attached USB device(s).',
+      checkedAt: DateTime.now(),
+    );
+  }
+
+  /// Android enumerates vendor/product IDs; Windows only reports a name.
+  bool _usbMatches(DiscoveredPrinter device, PrinterConfig cfg) {
+    final wantVendor = cfg.vendorId.trim();
+    final wantProduct = cfg.productId.trim();
+    if (wantVendor.isNotEmpty &&
+        wantProduct.isNotEmpty &&
+        device.vendorId != null &&
+        device.productId != null) {
+      return device.vendorId == wantVendor && device.productId == wantProduct;
+    }
+    final wantName = cfg.name.trim().toLowerCase();
+    return wantName.isNotEmpty && device.name.trim().toLowerCase() == wantName;
+  }
+
+  Future<PrinterProbe> _probeBluetooth(PrinterConfig cfg) async {
+    // PrinterManager routes Bluetooth to the BT connector only on Android and
+    // iOS; on Windows it falls through to the TCP connector and throws on the
+    // input cast. Report that honestly instead of showing "not reachable".
+    if (!Platform.isAndroid && !Platform.isIOS) {
+      return PrinterProbe(
+        state: PrinterLinkState.unsupported,
+        kind: cfg.kind,
+        transport: 'Bluetooth',
+        detail: 'Bluetooth printing is only supported on Android and iOS.',
+        checkedAt: DateTime.now(),
+      );
+    }
+
+    final devices = await discover(PrinterKind.bluetooth, isBle: cfg.isBle);
+    final wantAddress = cfg.address.trim().toLowerCase();
+    for (final device in devices) {
+      if (device.address?.trim().toLowerCase() == wantAddress) {
+        return PrinterProbe(
+          state: PrinterLinkState.connected,
+          kind: cfg.kind,
+          transport: 'Bluetooth',
+          detail: device.name.isEmpty ? cfg.address : device.name,
+          checkedAt: DateTime.now(),
+        );
+      }
+    }
+    return PrinterProbe(
+      state: PrinterLinkState.unreachable,
+      kind: cfg.kind,
+      transport: 'Bluetooth',
+      detail: 'Printer ${cfg.address} did not answer the scan. '
+          'Check it is powered on and in range.',
+      checkedAt: DateTime.now(),
+    );
   }
 
   // ── transport ─────────────────────────────────────────────

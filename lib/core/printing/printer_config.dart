@@ -25,6 +25,71 @@ class DiscoveredPrinter {
   const DiscoveredPrinter({required this.name, this.address, this.vendorId, this.productId});
 }
 
+/// Outcome of a live connectivity check against the configured printer.
+enum PrinterLinkState {
+  /// First probe hasn't returned yet.
+  checking,
+
+  /// Reachable right now.
+  connected,
+
+  /// Configured, but the printer did not answer.
+  unreachable,
+
+  /// No printer saved on this device yet.
+  notConfigured,
+
+  /// This platform (web) or this transport (Bluetooth on Windows) can't be probed.
+  unsupported,
+}
+
+/// A point-in-time answer to "is the printer there?".
+///
+/// [transport] is what the user sees — "USB", "Bluetooth", "Network · Wi-Fi".
+/// It is resolved at probe time rather than read off the config, because the
+/// network case depends on how *this device* currently reaches the LAN.
+class PrinterProbe {
+  final PrinterLinkState state;
+  final PrinterKind? kind;
+  final String transport;
+  final String detail;
+  final DateTime checkedAt;
+
+  const PrinterProbe({
+    required this.state,
+    required this.checkedAt,
+    this.kind,
+    this.transport = '',
+    this.detail = '',
+  });
+
+  PrinterProbe.checking()
+      : state = PrinterLinkState.checking,
+        kind = null,
+        transport = '',
+        detail = 'Checking printer…',
+        checkedAt = DateTime.fromMillisecondsSinceEpoch(0);
+
+  bool get isConnected => state == PrinterLinkState.connected;
+
+  /// Whether a repeated poll is worth running. There is nothing to re-check
+  /// when no printer is saved, or when the platform can't reach one at all.
+  bool get isPollable =>
+      state != PrinterLinkState.notConfigured && state != PrinterLinkState.unsupported;
+
+  String get headline => switch (state) {
+        PrinterLinkState.checking => 'Checking…',
+        PrinterLinkState.connected => 'Connected',
+        PrinterLinkState.unreachable => 'Not reachable',
+        PrinterLinkState.notConfigured => 'No printer',
+        PrinterLinkState.unsupported => 'Unavailable',
+      };
+
+  /// Short label for the status pill: "Connected · USB".
+  String get pillLabel =>
+      transport.isEmpty ? headline : '$headline · $transport';
+}
+
 class PrinterConfig {
   final PrinterKind kind;
   final String address; // BT MAC / TCP host
