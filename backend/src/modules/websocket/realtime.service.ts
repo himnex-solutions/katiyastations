@@ -78,4 +78,22 @@ export class RealtimeService {
   purchaseCreated(branchId: string, payload: unknown) {
     this.gateway.emitToRoom(SocketRooms.branch(branchId), SocketEvents.purchaseCreated, payload);
   }
+
+  /**
+   * A menu category or item was created, updated, deleted, or bulk-imported.
+   * Every screen that lists the menu (menu management, waiter ordering) reloads.
+   */
+  menuChanged(branchId: string, payload: unknown) {
+    this.gateway.emitToRoom(SocketRooms.branch(branchId), SocketEvents.menuChanged, payload);
+    this.gateway.emitToRoom(SocketRooms.kitchen(branchId), SocketEvents.menuChanged, payload);
+  }
+
+  /**
+   * Generic "something under /<entity> was written" signal, emitted by
+   * RealtimeChangeInterceptor for the modules that have no bespoke event of
+   * their own. The client maps `entity` back to the providers that read it.
+   */
+  dataChanged(branchId: string, entity: string, action: string) {
+    this.gateway.emitToRoom(SocketRooms.branch(branchId), SocketEvents.dataChanged, { entity, action });
+  }
 }

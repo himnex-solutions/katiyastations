@@ -7,10 +7,14 @@ import { CreateMenuItemDto } from './dto/create-menu-item.dto';
 import { UpdateMenuItemDto } from './dto/update-menu-item.dto';
 import { UpdateRecipeDto } from './dto/update-recipe.dto';
 import { AddRecipeIngredientDto } from './dto/add-recipe-ingredient.dto';
+import { RealtimeService } from '../websocket/realtime.service';
 
 @Injectable()
 export class MenuService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly realtime: RealtimeService,
+  ) {}
 
   // ── Categories ────────────────────────────────────────────
 
@@ -27,18 +31,23 @@ export class MenuService {
     return category;
   }
 
-  createCategory(dto: CreateCategoryDto) {
-    return this.prisma.menuCategory.create({ data: dto });
+  async createCategory(dto: CreateCategoryDto) {
+    const category = await this.prisma.menuCategory.create({ data: dto });
+    this.realtime.menuChanged(category.branchId, { action: 'category_created', id: category.id });
+    return category;
   }
 
   async updateCategory(id: string, dto: UpdateCategoryDto) {
     await this.findCategory(id);
-    return this.prisma.menuCategory.update({ where: { id }, data: dto });
+    const category = await this.prisma.menuCategory.update({ where: { id }, data: dto });
+    this.realtime.menuChanged(category.branchId, { action: 'category_updated', id });
+    return category;
   }
 
   async removeCategory(id: string) {
-    await this.findCategory(id);
+    const category = await this.findCategory(id);
     await this.prisma.menuCategory.delete({ where: { id } });
+    this.realtime.menuChanged(category.branchId, { action: 'category_deleted', id });
     return { deleted: true };
   }
 
@@ -61,18 +70,35 @@ export class MenuService {
     return item;
   }
 
-  createItem(dto: CreateMenuItemDto) {
-    return this.prisma.menuItem.create({ data: dto });
+  async createItem(dto: CreateMenuItemDto) {
+    const item = await this.prisma.menuItem.create({ data: dto });
+    this.realtime.menuChanged(item.branchId, {
+      action: 'item_created',
+      id: item.id,
+      categoryId: item.categoryId,
+    });
+    return item;
   }
 
   async updateItem(id: string, dto: UpdateMenuItemDto) {
     await this.findItem(id);
-    return this.prisma.menuItem.update({ where: { id }, data: dto });
+    const item = await this.prisma.menuItem.update({ where: { id }, data: dto });
+    this.realtime.menuChanged(item.branchId, {
+      action: 'item_updated',
+      id,
+      categoryId: item.categoryId,
+    });
+    return item;
   }
 
   async removeItem(id: string) {
-    await this.findItem(id);
+    const item = await this.findItem(id);
     await this.prisma.menuItem.delete({ where: { id } });
+    this.realtime.menuChanged(item.branchId, {
+      action: 'item_deleted',
+      id,
+      categoryId: item.categoryId,
+    });
     return { deleted: true };
   }
 
@@ -185,6 +211,9 @@ export class MenuService {
       created++;
     }
 
+    if (created > 0) {
+      this.realtime.menuChanged(branchId, { action: 'imported', created, skipped });
+    }
     return { created, skipped };
   }
 }

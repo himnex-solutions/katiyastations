@@ -37,19 +37,19 @@ export class MenuController {
     return this.menuService.findCategory(id);
   }
 
-  @Roles('super_admin', 'branch_manager')
+  @Roles('super_admin', 'branch_manager', 'cashier')
   @Post('categories')
   createCategory(@Body() dto: CreateCategoryDto) {
     return this.menuService.createCategory(dto);
   }
 
-  @Roles('super_admin', 'branch_manager')
+  @Roles('super_admin', 'branch_manager', 'cashier')
   @Patch('categories/:id')
   updateCategory(@Param('id') id: string, @Body() dto: UpdateCategoryDto) {
     return this.menuService.updateCategory(id, dto);
   }
 
-  @Roles('super_admin', 'branch_manager')
+  @Roles('super_admin', 'branch_manager', 'cashier')
   @Delete('categories/:id')
   removeCategory(@Param('id') id: string) {
     return this.menuService.removeCategory(id);
@@ -67,19 +67,19 @@ export class MenuController {
     return this.menuService.findItem(id);
   }
 
-  @Roles('super_admin', 'branch_manager')
+  @Roles('super_admin', 'branch_manager', 'cashier')
   @Post('items')
   createItem(@Body() dto: CreateMenuItemDto) {
     return this.menuService.createItem(dto);
   }
 
-  @Roles('super_admin', 'branch_manager')
+  @Roles('super_admin', 'branch_manager', 'cashier')
   @Patch('items/:id')
   updateItem(@Param('id') id: string, @Body() dto: UpdateMenuItemDto) {
     return this.menuService.updateItem(id, dto);
   }
 
-  @Roles('super_admin', 'branch_manager')
+  @Roles('super_admin', 'branch_manager', 'cashier')
   @Delete('items/:id')
   removeItem(@Param('id') id: string) {
     return this.menuService.removeItem(id);
@@ -123,7 +123,7 @@ export class MenuController {
     return this.menuService.findByBranch(branchId);
   }
 
-  @Roles('super_admin', 'branch_manager')
+  @Roles('super_admin', 'branch_manager', 'cashier')
   @Post('import/excel')
   @UseInterceptors(FileInterceptor('file'))
   importExcel(@UploadedFile() file: Express.Multer.File, @Query('branchId') branchId: string) {

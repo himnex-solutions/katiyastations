@@ -33,6 +33,8 @@ export const SocketEvents = {
   waiterAssigned: 'session:waiter_assigned',
   userChanged: 'user:changed',
   purchaseCreated: 'purchase:created',
+  menuChanged: 'menu:changed',
+  dataChanged: 'data:changed',
 } as const;
 
 export const SocketRooms = {

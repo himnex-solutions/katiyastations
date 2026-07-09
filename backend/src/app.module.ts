@@ -15,6 +15,7 @@ import { RolesGuard } from './common/guards/roles.guard';
 import { BlockSuperAdminGuard } from './common/guards/block-super-admin.guard';
 import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
 import { SnakeCaseInterceptor } from './common/interceptors/snake-case.interceptor';
+import { RealtimeChangeInterceptor } from './common/interceptors/realtime-change.interceptor';
 
 import { AuthModule } from './modules/auth/auth.module';
 import { BranchesModule } from './modules/branches/branches.module';
@@ -52,6 +53,9 @@ import { SuperAdminModule } from './modules/super-admin/super-admin.module';
     }),
     ThrottlerModule.forRoot([{ ttl: 60_000, limit: 120 }]),
     PrismaModule,
+    // Imported here (not only by feature modules) so the global
+    // RealtimeChangeInterceptor below can inject RealtimeService.
+    WebsocketModule,
 
     AuthModule,
     BranchesModule,
@@ -87,6 +91,7 @@ import { SuperAdminModule } from './modules/super-admin/super-admin.module';
     { provide: APP_GUARD, useClass: RolesGuard },
     { provide: APP_GUARD, useClass: BlockSuperAdminGuard },
     { provide: APP_INTERCEPTOR, useClass: LoggingInterceptor },
+    { provide: APP_INTERCEPTOR, useClass: RealtimeChangeInterceptor },
     { provide: APP_INTERCEPTOR, useClass: SnakeCaseInterceptor },
   ],
 })

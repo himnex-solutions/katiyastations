@@ -8,6 +8,7 @@ import '../../../../core/utils/responsive_utils.dart';
 import '../../../../core/widgets/confirm_dialog.dart';
 import '../../../../core/constants/api_constants.dart';
 import '../../../../core/network/api_client.dart';
+import '../../../../core/network/refresh_signals.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
 
 class ShiftClosingScreen extends ConsumerStatefulWidget {
@@ -65,6 +66,12 @@ class _ShiftClosingScreenState extends ConsumerState<ShiftClosingScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Loaded imperatively, so the realtime layer has no provider to
+    // invalidate — it advances this tick instead. A bill paid on the cashier
+    // terminal moves today's totals here without a reload.
+    ref.listen(entityRefreshProvider(RefreshEntity.shiftClosing),
+        (_, __) => _loadTodaySummary());
+
     final profile = ref.watch(authNotifierProvider).value;
 
     return Scaffold(

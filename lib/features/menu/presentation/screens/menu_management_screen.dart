@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
+import '../../../../core/app_messenger.dart';
 import '../../../../core/constants/app_colors.dart';
 import '../../../../core/constants/api_constants.dart';
 import '../../../../core/network/api_client.dart';
@@ -12,6 +13,7 @@ import '../../../../core/utils/responsive_utils.dart';
 import '../../../../core/widgets/confirm_dialog.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
 import '../../../menu/domain/entities/menu_entities.dart';
+import '../../../orders/presentation/providers/order_provider.dart';
 import '../widgets/recipe_dialog.dart';
 import 'package:file_picker/file_picker.dart';
 
@@ -55,6 +57,38 @@ final menuItemsAllProvider = FutureProvider<List<MenuItem>>((ref) async {
   return rows.map((r) => MenuItem.fromJson(r as Map<String, dynamic>)).toList()
     ..sort((a, b) => a.name.compareTo(b.name));
 });
+
+/// Reloads every cached view of the menu — this screen's three providers plus
+/// the copies the waiter ordering screen keeps. Passing a family invalidates
+/// all of its live instances, which matters after a bulk import creates
+/// categories that were not on screen when the import started.
+///
+/// The backend also broadcasts `menu:changed` on every mutation, so other
+/// devices refresh on their own; this call is what makes the *acting* device
+/// update instantly even if its socket happens to be reconnecting.
+void _refreshMenuCaches(WidgetRef ref) {
+  ref.invalidate(menuCategoriesStreamProvider);
+  ref.invalidate(menuItemsAllProvider);
+  ref.invalidate(menuItemsByCatProvider);
+  ref.invalidate(menuCategoriesProvider);
+  ref.invalidate(menuItemsProvider);
+  ref.invalidate(allMenuItemsProvider);
+}
+
+/// Floating toast on the app-wide messenger, so it survives dialogs closing
+/// and stays visible even if the screen itself is rebuilt underneath it.
+void _toast(String message, {required Color background}) {
+  scaffoldMessengerKey.currentState
+    ?..hideCurrentSnackBar()
+    ..showSnackBar(SnackBar(
+      content: Text(message,
+          style: GoogleFonts.outfit(
+              fontWeight: FontWeight.w600, color: Colors.white)),
+      backgroundColor: background,
+      behavior: SnackBarBehavior.floating,
+      duration: const Duration(seconds: 3),
+    ));
+}
 
 // Design constants local to this screen, kept in one place so the whole
 // surface reads as one considered system rather than ad-hoc numbers.
@@ -838,7 +872,12 @@ class _MenuManagementScreenState extends ConsumerState<MenuManagementScreen> {
                   borderRadius: BorderRadius.circular(10)),
             ),
             onPressed: () async {
-              final scaffoldMessenger = ScaffoldMessenger.of(context);
+              final name = nameCtrl.text.trim();
+              if (name.isEmpty) {
+                _toast('Category name is required.',
+                    background: AppColors.error);
+                return;
+              }
               try {
                 final profile = ref.read(authNotifierProvider).value;
                 if (profile?.branchId == null) {
@@ -849,18 +888,16 @@ class _MenuManagementScreenState extends ConsumerState<MenuManagementScreen> {
                   ApiConstants.menuCategories,
                   data: {
                     'branchId': profile!.branchId,
-                    'name': nameCtrl.text.trim(),
+                    'name': name,
                     'type': type,
                   },
                 );
-                ref.invalidate(menuCategoriesStreamProvider);
-                if (context.mounted) Navigator.pop(ctx);
+                if (ctx.mounted) Navigator.pop(ctx);
+                _refreshMenuCaches(ref);
+                _toast('Category "$name" added.',
+                    background: AppColors.success);
               } catch (e) {
-                scaffoldMessenger.showSnackBar(
-                  SnackBar(
-                      content: Text('Error: $e'),
-                      backgroundColor: AppColors.error),
-                );
+                _toast('Error: $e', background: AppColors.error);
               }
             },
             child: Text('Add',
@@ -964,7 +1001,11 @@ class _MenuManagementScreenState extends ConsumerState<MenuManagementScreen> {
                   borderRadius: BorderRadius.circular(10)),
             ),
             onPressed: () async {
-              final scaffoldMessenger = ScaffoldMessenger.of(context);
+              final name = nameCtrl.text.trim();
+              if (name.isEmpty) {
+                _toast('Item name is required.', background: AppColors.error);
+                return;
+              }
               try {
                 final profile = ref.read(authNotifierProvider).value;
                 if (profile?.branchId == null) {
@@ -975,7 +1016,7 @@ class _MenuManagementScreenState extends ConsumerState<MenuManagementScreen> {
                 final data = {
                   'branchId': profile!.branchId,
                   'categoryId': targetCatId,
-                  'name': nameCtrl.text.trim(),
+                  'name': name,
                   'price': double.tryParse(priceCtrl.text) ?? 0,
                   'imageUrl': imageUrlCtrl.text.trim().isEmpty
                       ? null
@@ -993,17 +1034,16 @@ class _MenuManagementScreenState extends ConsumerState<MenuManagementScreen> {
                       ApiConstants.menuItemById(existing.id),
                       data: data);
                 }
-                if (targetCatId != null) {
-                  ref.invalidate(menuItemsByCatProvider(targetCatId));
-                }
-                ref.invalidate(menuItemsAllProvider);
-                if (context.mounted) Navigator.pop(ctx);
-              } catch (e) {
-                scaffoldMessenger.showSnackBar(
-                  SnackBar(
-                      content: Text('Error: $e'),
-                      backgroundColor: AppColors.error),
+                if (ctx.mounted) Navigator.pop(ctx);
+                _refreshMenuCaches(ref);
+                _toast(
+                  existing == null
+                      ? 'Item "$name" added.'
+                      : 'Item "$name" updated.',
+                  background: AppColors.success,
                 );
+              } catch (e) {
+                _toast('Error: $e', background: AppColors.error);
               }
             },
             child: Text('Save',
@@ -1015,7 +1055,20 @@ class _MenuManagementScreenState extends ConsumerState<MenuManagementScreen> {
   }
 
   Future<void> _importBulkExcel(BuildContext context) async {
-    final messenger = ScaffoldMessenger.of(context);
+    // showDialog pushes the progress dialog onto the ROOT navigator, but this
+    // screen lives inside the ShellRoute's nested navigator. Popping `context`
+    // therefore tore the /menu page off the shell instead of closing the
+    // dialog — which is what produced the blank screen after an import that
+    // had, in fact, already succeeded. Hold the root navigator explicitly.
+    final rootNavigator = Navigator.of(context, rootNavigator: true);
+    var loaderVisible = false;
+
+    void closeLoader() {
+      if (!loaderVisible) return;
+      loaderVisible = false;
+      rootNavigator.pop();
+    }
+
     try {
       final result = await FilePicker.platform.pickFiles(
         type: FileType.custom,
@@ -1037,6 +1090,7 @@ class _MenuManagementScreenState extends ConsumerState<MenuManagementScreen> {
       }
 
       if (!context.mounted) return;
+      loaderVisible = true;
       showDialog(
         context: context,
         barrierDismissible: false,
@@ -1051,7 +1105,7 @@ class _MenuManagementScreenState extends ConsumerState<MenuManagementScreen> {
                 children: [
                   const CircularProgressIndicator(color: AppColors.primary),
                   const SizedBox(height: 16),
-                  Text('Importing menu items… please wait.',
+                  Text('Uploading menu… please wait.',
                       style: GoogleFonts.outfit(
                           fontSize: 13, color: AppColors.textSecondary)),
                 ],
@@ -1073,32 +1127,21 @@ class _MenuManagementScreenState extends ConsumerState<MenuManagementScreen> {
         formData,
       );
       final resultData = response.data as Map<String, dynamic>;
-      final created = resultData['created'] as int? ?? 0;
+      final created = (resultData['created'] as num?)?.toInt() ?? 0;
+      final skipped = (resultData['skipped'] as num?)?.toInt() ?? 0;
 
-      if (context.mounted) Navigator.pop(context);
+      closeLoader();
+      _refreshMenuCaches(ref);
 
-      ref.invalidate(menuCategoriesStreamProvider);
-      if (_selectedCatId != null) {
-        ref.invalidate(menuItemsByCatProvider(_selectedCatId!));
-      }
-      ref.invalidate(menuItemsAllProvider);
-
-      messenger.showSnackBar(
-        SnackBar(
-          content: Text('Imported $created menu items!'),
-          backgroundColor: AppColors.success,
-        ),
+      final skippedNote =
+          skipped > 0 ? ' · $skipped row${skipped == 1 ? '' : 's'} skipped' : '';
+      _toast(
+        'Uploaded successfully — $created item${created == 1 ? '' : 's'} added$skippedNote',
+        background: AppColors.success,
       );
     } catch (e) {
-      if (context.mounted) {
-        Navigator.of(context)
-            .popUntil((route) => route.isFirst || route.settings.name != null);
-      }
-      messenger.showSnackBar(
-        SnackBar(
-            content: Text('Failed to import: $e'),
-            backgroundColor: AppColors.error),
-      );
+      closeLoader();
+      _toast('Failed to import: $e', background: AppColors.error);
     }
   }
 
@@ -1113,9 +1156,16 @@ class _MenuManagementScreenState extends ConsumerState<MenuManagementScreen> {
       icon: Icons.delete_outline_rounded,
     );
     if (!confirmed) return;
-    await ApiClient.instance.delete(ApiConstants.menuCategoryById(id));
-    ref.invalidate(menuCategoriesStreamProvider);
-    if (_selectedCatId == id) setState(() => _selectedCatId = null);
+    try {
+      await ApiClient.instance.delete(ApiConstants.menuCategoryById(id));
+      if (_selectedCatId == id && mounted) {
+        setState(() => _selectedCatId = null);
+      }
+      _refreshMenuCaches(ref);
+      _toast('Category "$name" deleted.', background: AppColors.success);
+    } catch (e) {
+      _toast('Could not delete category: $e', background: AppColors.error);
+    }
   }
 
   Future<void> _deleteItem(MenuItem item) async {
@@ -1129,9 +1179,13 @@ class _MenuManagementScreenState extends ConsumerState<MenuManagementScreen> {
       icon: Icons.delete_outline_rounded,
     );
     if (!confirmed) return;
-    await ApiClient.instance.delete(ApiConstants.menuItemById(item.id));
-    ref.invalidate(menuItemsByCatProvider(item.categoryId));
-    ref.invalidate(menuItemsAllProvider);
+    try {
+      await ApiClient.instance.delete(ApiConstants.menuItemById(item.id));
+      _refreshMenuCaches(ref);
+      _toast('Item "${item.name}" deleted.', background: AppColors.success);
+    } catch (e) {
+      _toast('Could not delete item: $e', background: AppColors.error);
+    }
   }
 }
 
@@ -1306,12 +1360,21 @@ class _MenuItemCard extends StatelessWidget {
       icon: turningOff ? Icons.toggle_off_rounded : Icons.toggle_on_rounded,
     );
     if (!confirmed) return;
-    await ApiClient.instance.patch(
-      ApiConstants.menuItemById(item.id),
-      data: {'isAvailable': !item.isAvailable},
-    );
-    ref.invalidate(menuItemsByCatProvider(item.categoryId));
-    ref.invalidate(menuItemsAllProvider);
+    try {
+      await ApiClient.instance.patch(
+        ApiConstants.menuItemById(item.id),
+        data: {'isAvailable': !item.isAvailable},
+      );
+      _refreshMenuCaches(ref);
+      _toast(
+        turningOff
+            ? '"${item.name}" turned off.'
+            : '"${item.name}" turned on.',
+        background: AppColors.success,
+      );
+    } catch (e) {
+      _toast('Could not update availability: $e', background: AppColors.error);
+    }
   }
 
   @override

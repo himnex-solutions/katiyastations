@@ -52,6 +52,13 @@ class SocketEvents {
 
   // Purchase events (recorded spend → daily report)
   static const String purchaseCreated = 'purchase:created';
+
+  // Menu events (category/item added, edited, deleted, bulk-imported)
+  static const String menuChanged = 'menu:changed';
+
+  // Generic write signal for modules without a bespoke event.
+  // Payload: { entity: 'expenses', action: 'POST' }
+  static const String dataChanged = 'data:changed';
 }
 
 /// Room name builders — must match the backend gateway
@@ -198,6 +205,18 @@ class SocketClient {
   Stream<Map<String, dynamic>> onPurchaseCreated() =>
       on(SocketEvents.purchaseCreated).map((d) => d as Map<String, dynamic>);
 
+  Stream<Map<String, dynamic>> onMenuChanged() =>
+      on(SocketEvents.menuChanged).map((d) => d as Map<String, dynamic>);
+
+  Stream<Map<String, dynamic>> onDataChanged() =>
+      on(SocketEvents.dataChanged).map((d) => d as Map<String, dynamic>);
+
+  Stream<Map<String, dynamic>> onShiftClosed() =>
+      on(SocketEvents.shiftClosed).map((d) => d as Map<String, dynamic>);
+
+  Stream<Map<String, dynamic>> onShiftApproved() =>
+      on(SocketEvents.shiftApproved).map((d) => d as Map<String, dynamic>);
+
   // ── Emit (send event to server) ────────────────────────────
   void emit(String event, [dynamic data]) {
     _socket?.emit(event, data);
@@ -251,5 +270,7 @@ class SocketClient {
     SocketEvents.waiterAssigned,
     SocketEvents.userChanged,
     SocketEvents.purchaseCreated,
+    SocketEvents.menuChanged,
+    SocketEvents.dataChanged,
   ];
 }

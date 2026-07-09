@@ -6,6 +6,7 @@ import 'package:intl/intl.dart';
 import '../../../../core/constants/app_colors.dart';
 import '../../../../core/constants/api_constants.dart';
 import '../../../../core/network/api_client.dart';
+import '../../../../core/network/refresh_signals.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
 
 class AttendanceScreen extends ConsumerStatefulWidget {
@@ -69,6 +70,12 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Loaded imperatively, so the realtime layer has no provider to
+    // invalidate — it advances this tick instead. Keeps a manager's clock-in
+    // correction visible on the staff member's own device.
+    ref.listen(entityRefreshProvider(RefreshEntity.attendance),
+        (_, __) => _loadTodayRecord());
+
     final profile = ref.watch(authNotifierProvider).value;
     final checkedIn = _todayRecord != null;
     final checkedOut = _todayRecord?['clock_out'] != null;

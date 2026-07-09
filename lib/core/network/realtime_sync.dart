@@ -12,6 +12,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'refresh_signals.dart';
 import 'socket_client.dart';
 import '../app_messenger.dart';
 import '../../features/auth/presentation/providers/auth_provider.dart';
@@ -26,6 +27,13 @@ import '../../features/inventory/presentation/screens/inventory_screen.dart';
 import '../../features/cashier/presentation/screens/cashier_screen.dart';
 import '../../features/users/presentation/screens/users_screen.dart';
 import '../../features/purchase/presentation/screens/purchase_screen.dart';
+import '../../features/menu/presentation/screens/menu_management_screen.dart';
+import '../../features/bar/presentation/screens/bar_screen.dart';
+import '../../features/branches/presentation/screens/branch_management_screen.dart';
+import '../../features/expense/presentation/screens/expense_screen.dart';
+import '../../features/loyalty/presentation/screens/loyalty_screen.dart';
+import '../../features/reservation/presentation/screens/reservation_screen.dart';
+import '../../features/suppliers/presentation/screens/supplier_screen.dart';
 
 /// Watched once from [AppShell] so it stays alive for the whole
 /// authenticated session. Do not watch this from individual screens —
@@ -60,6 +68,56 @@ final realtimeSyncProvider = Provider<void>((ref) {
     invalidateTablesAndSessions();
   }
 
+  /// Maps the `entity` of a generic `data:changed` event back to whatever
+  /// reads it. Entities whose screens load imperatively (no provider to
+  /// invalidate) get a refresh tick instead — see [refresh_signals.dart].
+  void invalidateEntity(String entity) {
+    switch (entity) {
+      case 'credit':
+        ref.invalidate(creditProvider);
+        ref.invalidate(dashboardCreditProvider);
+      case 'expenses':
+        ref.invalidate(expensesProvider);
+      case 'reservations':
+        ref.invalidate(reservationsProvider);
+      case 'suppliers':
+        ref.invalidate(suppliersProvider);
+      case 'loyalty':
+        ref.invalidate(loyaltyCustomersProvider);
+        ref.invalidate(loyaltyHistoryProvider);
+      case 'inventory':
+        ref.invalidate(inventoryProvider);
+      case 'bar':
+        ref.invalidate(barStockProvider);
+      case 'branches':
+        ref.invalidate(branchesProvider);
+      case 'notifications':
+        // Marking one device's alerts read clears the badge on the others.
+        ref.invalidate(notificationsProvider);
+      case 'customers':
+      case 'staff':
+      case 'attendance':
+      case 'shift-closing':
+        bumpRefresh(ref, entity);
+      default:
+        // An entity we don't render yet (payroll, ...). Nothing to refresh.
+        break;
+    }
+  }
+
+  // Passing the family itself (rather than one of its instances) invalidates
+  // every category/branch variant currently alive, so a bulk import that
+  // creates brand-new categories refreshes them all.
+  void invalidateMenu() {
+    ref.invalidate(menuCategoriesStreamProvider);
+    ref.invalidate(menuItemsAllProvider);
+    ref.invalidate(menuItemsByCatProvider);
+    // Waiter ordering screen reads its own copies of the same data.
+    ref.invalidate(menuCategoriesProvider);
+    ref.invalidate(menuItemsProvider);
+    ref.invalidate(allMenuItemsProvider);
+  }
+
   subscriptions.addAll([
     socket.onKotNew().listen((_) => invalidateKots()),
     socket.onKotUpdated().listen((_) => invalidateKots()),
@@ -82,6 +140,21 @@ final realtimeSyncProvider = Provider<void>((ref) {
     socket.onUserChanged().listen((_) => ref.invalidate(branchUsersProvider)),
     // Purchase recorded — refresh the purchase list and the daily report.
     socket.onPurchaseCreated().listen((_) => ref.invalidate(purchasesProvider)),
+    // Menu edited / imported on any device — every menu surface reloads live.
+    socket.onMenuChanged().listen((_) => invalidateMenu()),
+    // Shift submitted / approved / rejected — the manager's queue updates.
+    socket
+        .onShiftClosed()
+        .listen((_) => bumpRefresh(ref, RefreshEntity.shiftClosing)),
+    socket
+        .onShiftApproved()
+        .listen((_) => bumpRefresh(ref, RefreshEntity.shiftClosing)),
+    // Everything else: one generic signal from RealtimeChangeInterceptor,
+    // covering the modules that publish no event of their own.
+    socket.onDataChanged().listen((data) {
+      final entity = data['entity'] as String?;
+      if (entity != null) invalidateEntity(entity);
+    }),
   ]);
 
   ref.onDispose(() {

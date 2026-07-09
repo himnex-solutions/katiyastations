@@ -9,12 +9,20 @@ import '../../../../core/constants/api_constants.dart';
 import '../../../../core/network/api_client.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
 
+/// The backend pages at 20 by default. Every write now records an activity
+/// notification, so a busy service would peg the unread badge at "20" and
+/// hide everything older. 100 is the server's `@Max(100)` ceiling.
+const int _notificationPageSize = 100;
+
 final notificationsProvider = FutureProvider<List<Map<String, dynamic>>>((ref) async {
   final profile = ref.watch(authNotifierProvider).value;
   if (profile?.branchId == null) return [];
   final response = await ApiClient.instance.get(
     ApiConstants.notifications,
-    queryParameters: {'branchId': profile!.branchId!},
+    queryParameters: {
+      'branchId': profile!.branchId!,
+      'limit': _notificationPageSize,
+    },
   );
   final data = response.data as Map<String, dynamic>;
   final rows = List<Map<String, dynamic>>.from(data['data'] as List? ?? []);
@@ -29,12 +37,27 @@ final unreadNotificationCountProvider = Provider<int>((ref) {
   return rows.where((n) => n['is_read'] != true).length;
 });
 
+Future<void> _markRead(WidgetRef ref, String id) async {
+  await ApiClient.instance.patch(ApiConstants.markNotificationRead(id));
+  ref.invalidate(notificationsProvider);
+}
+
+Future<void> _markAllRead(WidgetRef ref, String branchId) async {
+  await ApiClient.instance.patch(
+    ApiConstants.markAllRead,
+    queryParameters: {'branchId': branchId},
+  );
+  ref.invalidate(notificationsProvider);
+}
+
 class NotificationsScreen extends ConsumerWidget {
   const NotificationsScreen({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final notifsAsync = ref.watch(notificationsProvider);
+    final unread = ref.watch(unreadNotificationCountProvider);
+    final branchId = ref.watch(authNotifierProvider).value?.branchId;
 
     return Scaffold(
       backgroundColor: AppColors.background,
@@ -60,6 +83,18 @@ class NotificationsScreen extends ConsumerWidget {
                     color: AppColors.textPrimary)),
           ],
         ),
+        actions: [
+          if (unread > 0 && branchId != null)
+            TextButton.icon(
+              onPressed: () => _markAllRead(ref, branchId),
+              icon: const Icon(Icons.done_all_rounded, size: 17),
+              label: Text('Mark all read',
+                  style: GoogleFonts.outfit(
+                      fontSize: 12.5, fontWeight: FontWeight.w600)),
+              style: TextButton.styleFrom(foregroundColor: AppColors.primary),
+            ),
+          const SizedBox(width: 8),
+        ],
       ),
       body: notifsAsync.when(
         loading: () => const Center(child: CircularProgressIndicator(color: AppColors.primary)),
@@ -76,7 +111,11 @@ class NotificationsScreen extends ConsumerWidget {
                 itemBuilder: (ctx, i) {
                   final n = rows[i];
                   final isRead = n['is_read'] as bool? ?? false;
-                  return Container(
+                  return GestureDetector(
+                    onTap: isRead
+                        ? null
+                        : () => _markRead(ref, n['id'] as String),
+                    child: Container(
                     margin: const EdgeInsets.only(bottom: 10),
                     padding: const EdgeInsets.all(14),
                     decoration: BoxDecoration(
@@ -109,6 +148,7 @@ class NotificationsScreen extends ConsumerWidget {
                         style: GoogleFonts.outfit(fontSize: 10, color: AppColors.textHint),
                       ),
                     ]),
+                  ),
                   ).animate().fadeIn(delay: Duration(milliseconds: i * 25));
                 },
               )),

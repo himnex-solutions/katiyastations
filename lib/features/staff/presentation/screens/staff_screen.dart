@@ -9,6 +9,7 @@ import '../../../../core/constants/app_colors.dart';
 import '../../../../core/widgets/confirm_dialog.dart';
 import '../../../../core/constants/api_constants.dart';
 import '../../../../core/network/api_client.dart';
+import '../../../../core/network/refresh_signals.dart';
 import '../../../../core/utils/responsive_utils.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
 
@@ -49,6 +50,10 @@ class _StaffScreenState extends ConsumerState<StaffScreen> with SingleTickerProv
 
   @override
   Widget build(BuildContext context) {
+    // Loaded imperatively, so the realtime layer has no provider to
+    // invalidate — it advances this tick instead.
+    ref.listen(entityRefreshProvider(RefreshEntity.staff), (_, __) => _load());
+
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(

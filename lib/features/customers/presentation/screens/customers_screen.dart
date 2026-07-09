@@ -6,6 +6,7 @@ import '../../../../core/constants/app_colors.dart';
 import '../../../../core/utils/responsive_utils.dart';
 import '../../../../core/constants/api_constants.dart';
 import '../../../../core/network/api_client.dart';
+import '../../../../core/network/refresh_signals.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
 
 class CustomersScreen extends ConsumerStatefulWidget {
@@ -37,6 +38,11 @@ class _CustomersScreenState extends ConsumerState<CustomersScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Loaded imperatively, so the realtime layer has no provider to
+    // invalidate — it advances this tick instead.
+    ref.listen(entityRefreshProvider(RefreshEntity.customers),
+        (_, __) => _load());
+
     final filtered = _search.isEmpty ? _customers : _customers.where((c) =>
         (c['name'] as String).toLowerCase().contains(_search) ||
         (c['phone'] as String? ?? '').contains(_search)).toList();
