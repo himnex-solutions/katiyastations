@@ -73,6 +73,12 @@ services:
       - '127.0.0.1:3000:3000'
     volumes:
       - backend_backups:/app/backups
+      # The Dockerfile's runtime stage copies only dist/, package*.json and
+      # prisma/, so the service-account key never lands in the image. Without
+      # this mount FcmService logs "not configured" and every push silently
+      # no-ops. Create backend/firebase-service-account.json first (it is
+      # gitignored) or the bind mount will materialise as an empty directory.
+      - ./firebase-service-account.json:/app/firebase-service-account.json:ro
 
   nginx:
     image: nginx:alpine

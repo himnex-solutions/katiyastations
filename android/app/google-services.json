@@ -1,0 +1,48 @@
+{
+  "project_info": {
+    "project_number": "561556257232",
+    "project_id": "katiyastation-adf42",
+    "storage_bucket": "katiyastation-adf42.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:561556257232:android:00663105e77454f79ae1d5",
+        "android_client_info": {
+          "package_name": "com.katiyastation.katiya_station_rms"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBPzcYM8r6bWjrs-1GmapIyWgdBK0d7IYE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:561556257232:android:99335516445474819ae1d5",
+        "android_client_info": {
+          "package_name": "com.katiyastation.rms"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBPzcYM8r6bWjrs-1GmapIyWgdBK0d7IYE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

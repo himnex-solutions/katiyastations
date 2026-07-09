@@ -39,37 +39,37 @@ class DefaultFirebaseOptions {
   // Obtain from: Firebase Console → Project Settings → Your Apps
 
   static const FirebaseOptions android = FirebaseOptions(
-    apiKey: 'YOUR_ANDROID_API_KEY',
-    appId: '1:000000000000:android:0000000000000000000000',
-    messagingSenderId: '000000000000',
-    projectId: 'katiya-station-rms',
-    storageBucket: 'katiya-station-rms.appspot.com',
+    apiKey: 'AIzaSyBPzcYM8r6bWjrs-1GmapIyWgdBK0d7IYE',
+    appId: '1:561556257232:android:00663105e77454f79ae1d5',
+    messagingSenderId: '561556257232',
+    projectId: 'katiyastation-adf42',
+    storageBucket: 'katiyastation-adf42.firebasestorage.app',
   );
-
   static const FirebaseOptions ios = FirebaseOptions(
-    apiKey: 'YOUR_IOS_API_KEY',
-    appId: '1:000000000000:ios:0000000000000000000000',
-    messagingSenderId: '000000000000',
-    projectId: 'katiya-station-rms',
-    storageBucket: 'katiya-station-rms.appspot.com',
-    iosBundleId: 'com.katiyastation.rms',
+    apiKey: 'AIzaSyAkrhOS0At9IdgLpSbChIROleQDR1nVvGk',
+    appId: '1:561556257232:ios:fbfe71e4a384d9b59ae1d5',
+    messagingSenderId: '561556257232',
+    projectId: 'katiyastation-adf42',
+    storageBucket: 'katiyastation-adf42.firebasestorage.app',
+    iosBundleId: 'com.katiyastation.katiyaStationRms',
   );
-
   static const FirebaseOptions web = FirebaseOptions(
-    apiKey: 'YOUR_WEB_API_KEY',
-    appId: '1:000000000000:web:0000000000000000000000',
-    messagingSenderId: '000000000000',
-    projectId: 'katiya-station-rms',
-    storageBucket: 'katiya-station-rms.appspot.com',
-    authDomain: 'katiya-station-rms.firebaseapp.com',
+    apiKey: 'AIzaSyCAO4R-OBI4HK4U9xU2jtZQolFDVIvjITI',
+    appId: '1:561556257232:web:e9849d57397877cb9ae1d5',
+    messagingSenderId: '561556257232',
+    projectId: 'katiyastation-adf42',
+    authDomain: 'katiyastation-adf42.firebaseapp.com',
+    storageBucket: 'katiyastation-adf42.firebasestorage.app',
+    measurementId: 'G-4XX5S9FBEH',
   );
 
   static const FirebaseOptions windows = FirebaseOptions(
-    apiKey: 'YOUR_WEB_API_KEY',
-    appId: '1:000000000000:web:0000000000000000000000',
-    messagingSenderId: '000000000000',
-    projectId: 'katiya-station-rms',
-    storageBucket: 'katiya-station-rms.appspot.com',
-    authDomain: 'katiya-station-rms.firebaseapp.com',
+    apiKey: 'AIzaSyCAO4R-OBI4HK4U9xU2jtZQolFDVIvjITI',
+    appId: '1:561556257232:web:4778872ba454357a9ae1d5',
+    messagingSenderId: '561556257232',
+    projectId: 'katiyastation-adf42',
+    authDomain: 'katiyastation-adf42.firebaseapp.com',
+    storageBucket: 'katiyastation-adf42.firebasestorage.app',
+    measurementId: 'G-PSKRYP4LWR',
   );
 }

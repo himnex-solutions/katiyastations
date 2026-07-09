@@ -4,12 +4,15 @@
 // Replaces all Supabase Auth calls
 // ============================================================
 
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/constants/api_constants.dart';
 import '../../../../core/errors/app_exceptions.dart';
 import '../../../../core/network/api_client.dart';
 import '../../../../core/network/socket_client.dart';
+import '../../../../core/notifications/fcm_registration.dart';
 import '../../../../core/storage/secure_storage.dart';
 import '../../domain/entities/user_profile.dart';
 
@@ -79,6 +82,10 @@ class AuthNotifier extends StateNotifier<AsyncValue<UserProfile?>> {
           await SocketClient.instance.connect();
           SocketClient.instance.joinBranchRoom(profile.branchId!);
         }
+
+        // Hand this device's FCM token to the backend. Fire-and-forget:
+        // it must never delay or fail a session restore.
+        unawaited(registerFcmToken());
       } else {
         // Token invalid or expired — clear and require login
         await SecureStorage.instance.clearSession();
@@ -175,6 +182,9 @@ class AuthNotifier extends StateNotifier<AsyncValue<UserProfile?>> {
         if (profile.branchId != null) {
           SocketClient.instance.joinBranchRoom(profile.branchId!);
         }
+
+        // Only now is there a Bearer token for POST /notifications/fcm-token.
+        unawaited(registerFcmToken());
       } else {
         final data = response.data as Map<String, dynamic>?;
         final message = data?['message'] as String? ?? 'Login failed.';
@@ -214,6 +224,9 @@ class AuthNotifier extends StateNotifier<AsyncValue<UserProfile?>> {
     } finally {
       // Disconnect socket
       SocketClient.instance.disconnect();
+
+      // Stop following token rotation for the account that just left.
+      await disposeFcmRegistration();
 
       // Clear all local storage
       await SecureStorage.instance.clearSession();

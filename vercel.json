@@ -1,7 +1,7 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "installCommand": "test -d flutter || git clone https://github.com/flutter/flutter.git -b 3.32.0 --depth 1",
-  "buildCommand": "flutter/bin/flutter config --enable-web && flutter/bin/flutter pub get && flutter/bin/flutter build web --release",
+  "buildCommand": "flutter/bin/flutter config --enable-web && flutter/bin/flutter pub get && flutter/bin/flutter build web --release --dart-define=FCM_VAPID_KEY=$FCM_VAPID_KEY",
   "outputDirectory": "build/web",
   "rewrites": [
     { "source": "/(.*)", "destination": "/index.html" }
