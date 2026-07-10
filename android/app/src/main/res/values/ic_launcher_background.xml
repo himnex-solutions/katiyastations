@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The logo's own backdrop, so the gold ring reads the same on every
+         launcher shape as it does on the emblem itself. -->
+    <color name="ic_launcher_background">#010101</color>
+</resources>
