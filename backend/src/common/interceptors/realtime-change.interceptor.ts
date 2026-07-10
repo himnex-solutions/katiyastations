@@ -5,6 +5,7 @@ import { tap } from 'rxjs/operators';
 import { PrismaService } from '../../prisma/prisma.service';
 import { RealtimeService } from '../../modules/websocket/realtime.service';
 import { CurrentUserPayload } from '../decorators/current-user.decorator';
+import { Role } from '../decorators/roles.decorator';
 
 /**
  * After every successful write this interceptor does two things:
@@ -14,9 +15,11 @@ import { CurrentUserPayload } from '../decorators/current-user.decorator';
  *     modules never emitted anything of their own — credit, expenses,
  *     customers, reservations, loyalty, suppliers, staff, attendance, payroll
  *     and branches were all invisible to other devices until a page reload.
+ *     This half is unconditional and silent: refreshing a list is cheap and
+ *     nobody's bell rings for it.
  *
- *  2. Records a Notification row and pushes `notification:new`, which is what
- *     lights the red badge on the bell.
+ *  2. For the handful of writes that another *role* needs to know about, it
+ *     records a Notification and pushes `notification:new` to that role only.
  *
  * Notifications are written straight through Prisma rather than through
  * NotificationsService on purpose: that service also fans out an FCM push,
@@ -24,47 +27,81 @@ import { CurrentUserPayload } from '../decorators/current-user.decorator';
  */
 
 /** Already publish a richer, targeted event. Emitting `data:changed` too would double every refetch on the app's hottest paths. */
-const SELF_EMITTING = new Set(['kots', 'tables', 'sessions', 'billing', 'menu', 'users', 'purchases']);
+const SELF_EMITTING = new Set([
+  'kots',
+  'tables',
+  'sessions',
+  'billing',
+  'menu',
+  'users',
+  'purchases',
+  // NotificationsService emits its own `data:changed` on clear, and it knows
+  // the branch even when a super_admin's token doesn't carry one.
+  'notifications',
+]);
 
 /** Not branch data, or must never trigger a refetch. */
 const IGNORED = new Set(['auth', 'uploads', 'super-admin', 'audit-logs', 'reports']);
-
-/**
- * Never notify about writes to the notification store itself. Marking an
- * alert as read is a PATCH — recording *that* as a fresh unread alert would
- * mean the badge could never be cleared.
- */
-const NEVER_NOTIFY = new Set([...IGNORED, 'notifications']);
-
-/** entity path segment → human label used in the notification title. */
-const ENTITY_LABELS: Record<string, string> = {
-  attendance: 'Attendance',
-  bar: 'Bar stock',
-  billing: 'Bill',
-  branches: 'Branch',
-  credit: 'Credit',
-  customers: 'Customer',
-  expenses: 'Expense',
-  inventory: 'Inventory',
-  kots: 'Kitchen order',
-  loyalty: 'Loyalty',
-  menu: 'Menu',
-  payroll: 'Payroll',
-  purchases: 'Purchase',
-  reservations: 'Reservation',
-  sessions: 'Table session',
-  'shift-closing': 'Shift',
-  staff: 'Staff',
-  suppliers: 'Supplier',
-  tables: 'Table',
-  users: 'User account',
-};
 
 const ACTION_VERBS: Record<string, string> = {
   POST: 'added',
   PUT: 'updated',
   PATCH: 'updated',
   DELETE: 'deleted',
+};
+
+interface NotifyRule {
+  /** Human label used in the notification title. */
+  label: string;
+  /** Roles whose bell should ring. The user who made the change is excluded. */
+  audience: Role[];
+  /** Restrict to specific HTTP methods. Omit to notify on all four. */
+  methods?: string[];
+}
+
+/**
+ * The whole notification policy, in one table.
+ *
+ * An entity that isn't listed here never writes a bell notification — it still
+ * broadcasts `data:changed`, so screens showing it stay live. That is the
+ * point: `kots`, `tables`, `sessions` and `billing` change many times a
+ * minute and already have dedicated live screens (kitchen board, table grid,
+ * cashier till). Ringing every bell for each of those ticks is the noise this
+ * table exists to kill.
+ *
+ * The rule for adding an entry: would a person in `audience` have to *do*
+ * something because of this write? If not, leave it out.
+ */
+const NOTIFY_RULES: Record<string, NotifyRule> = {
+  // Stock someone has to go count, reorder, or restock.
+  inventory: { label: 'Inventory', audience: ['inventory', 'branch_manager'] },
+  bar: { label: 'Bar stock', audience: ['inventory', 'branch_manager'] },
+  suppliers: { label: 'Supplier', audience: ['inventory', 'branch_manager'] },
+  purchases: {
+    label: 'Purchase',
+    audience: ['inventory', 'branch_manager', 'accountant'],
+    methods: ['POST', 'DELETE'],
+  },
+
+  // Money someone has to reconcile.
+  expenses: { label: 'Expense', audience: ['accountant', 'branch_manager'] },
+  credit: { label: 'Credit', audience: ['cashier', 'accountant', 'branch_manager'] },
+  'shift-closing': { label: 'Shift', audience: ['branch_manager', 'cashier'] },
+
+  // Front-of-house work handed to the floor.
+  reservations: { label: 'Reservation', audience: ['cashier', 'waiter', 'branch_manager'] },
+  customers: { label: 'Customer', audience: ['cashier', 'branch_manager'], methods: ['POST', 'DELETE'] },
+  loyalty: { label: 'Loyalty', audience: ['cashier', 'branch_manager'] },
+
+  // A changed menu invalidates what the floor and the kitchen can sell/cook.
+  menu: { label: 'Menu', audience: ['cashier', 'waiter', 'kitchen', 'branch_manager'] },
+
+  // People and pay — the manager's problem, nobody else's.
+  staff: { label: 'Staff', audience: ['branch_manager'] },
+  users: { label: 'User account', audience: ['branch_manager'] },
+  attendance: { label: 'Attendance', audience: ['branch_manager'] },
+  payroll: { label: 'Payroll', audience: ['branch_manager', 'accountant'] },
+  branches: { label: 'Branch', audience: ['branch_manager'] },
 };
 
 @Injectable()
@@ -102,8 +139,10 @@ export class RealtimeChangeInterceptor implements NestInterceptor {
         if (!SELF_EMITTING.has(entity)) {
           this.realtime.dataChanged(branchId, entity, method);
         }
-        if (!NEVER_NOTIFY.has(entity)) {
-          void this.recordNotification(branchId, entity, method, actor);
+
+        const rule = NOTIFY_RULES[entity];
+        if (rule && (rule.methods ?? Object.keys(ACTION_VERBS)).includes(method)) {
+          void this.recordNotification(branchId, rule, method, actor);
         }
       }),
     );
@@ -115,23 +154,30 @@ export class RealtimeChangeInterceptor implements NestInterceptor {
    */
   private async recordNotification(
     branchId: string,
-    entity: string,
+    rule: NotifyRule,
     method: string,
     actor: CurrentUserPayload | undefined,
   ): Promise<void> {
     try {
-      const label = ENTITY_LABELS[entity] ?? entity;
       const verb = ACTION_VERBS[method];
       const by = actor?.email ? ` by ${actor.email}` : '';
+
+      // Someone whose only role is the audience *and* who made the change
+      // would be told about their own click. Drop the write entirely rather
+      // than store a row nobody will ever be shown.
+      const audience = rule.audience.filter((role) => role !== actor?.role);
+      if (audience.length === 0) return;
 
       const notification = await this.prisma.notification.create({
         data: {
           branchId,
-          title: `${label} ${verb}`,
-          body: `${label} was ${verb}${by}.`,
+          title: `${rule.label} ${verb}`,
+          body: `${rule.label} was ${verb}${by}.`,
+          audience,
+          actorId: actor?.userId ?? null,
         },
       });
-      this.realtime.notification(branchId, notification);
+      this.realtime.notification(branchId, notification, audience);
     } catch (error) {
       this.logger.warn(`Could not record activity notification: ${(error as Error).message}`);
     }

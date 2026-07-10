@@ -12,6 +12,7 @@ import '../providers/kitchen_provider.dart';
 import '../../../orders/domain/entities/order_entities.dart';
 import '../../../orders/presentation/providers/order_provider.dart';
 import '../../../branches/presentation/providers/branch_provider.dart';
+import '../../../../core/widgets/notification_bell.dart';
 
 class KitchenScreen extends ConsumerWidget {
   const KitchenScreen({super.key});
@@ -69,6 +70,7 @@ class KitchenScreen extends ConsumerWidget {
               error: (_, __) => const SizedBox(),
             ),
           ),
+          const NotificationBell(),
         ],
       ),
       body: kotsAsync.when(

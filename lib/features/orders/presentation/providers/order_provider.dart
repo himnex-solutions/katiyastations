@@ -77,6 +77,75 @@ final sessionKotsProvider =
   }).toList();
 });
 
+/// What a session's kitchen orders allow the waiter to do next.
+///
+/// The kitchen walks each KOT `pending -> preparing -> ready -> served`, and
+/// only `served` means the guest actually has the food. Cancelled KOTs are
+/// ignored: they were voided, so nobody is waiting on them and a table left
+/// with nothing but cancellations is empty again.
+///
+/// While the KOTs are still loading, both gates stay shut. Withholding a
+/// button for a moment costs nothing; offering "Close & Free Table" on a table
+/// with food on the way loses the bill.
+class SessionOrderState {
+  final bool isLoading;
+
+  /// KOTs that haven't been cancelled.
+  final int liveCount;
+
+  /// Of those, how many the kitchen hasn't marked served yet.
+  final int unservedCount;
+
+  const SessionOrderState({
+    required this.isLoading,
+    required this.liveCount,
+    required this.unservedCount,
+  });
+
+  bool get hasOrders => liveCount > 0;
+
+  /// The food is all out — the guest can be billed.
+  bool get canRequestBill => !isLoading && liveCount > 0 && unservedCount == 0;
+
+  /// Nothing was ever ordered — the table can be released without a bill.
+  bool get canFreeTable => !isLoading && liveCount == 0;
+
+  /// Why the bill can't be requested, or null when it can. Lives here so the
+  /// tables screen and the order screen say the same thing to the waiter.
+  String? get billBlockedReason {
+    if (canRequestBill) return null;
+    if (isLoading) return 'Checking orders…';
+    if (liveCount == 0) return 'Nothing ordered yet — use Close & Free Table';
+    final s = unservedCount == 1 ? '' : 's';
+    return 'Waiting on the kitchen — $unservedCount order$s not served yet';
+  }
+
+  /// Why the table can't be freed, or null when it can.
+  String? get freeBlockedReason {
+    if (canFreeTable) return null;
+    if (isLoading) return 'Checking orders…';
+    return 'Table has orders — use Request Bill to free it';
+  }
+}
+
+/// Live view of [sessionKotsProvider]. The realtime layer invalidates that
+/// provider on every `kot:new` and `kot:status_changed`, so a waiter watching
+/// this sees "Request Bill" unlock the instant the kitchen marks the last
+/// order served — no refresh, no reopening the dialog.
+final sessionOrderStateProvider =
+    Provider.family<SessionOrderState, String>((ref, sessionId) {
+  final kots = ref.watch(sessionKotsProvider(sessionId)).valueOrNull;
+  if (kots == null) {
+    return const SessionOrderState(isLoading: true, liveCount: 0, unservedCount: 0);
+  }
+  final live = kots.where((k) => k.status != 'cancelled');
+  return SessionOrderState(
+    isLoading: false,
+    liveCount: live.length,
+    unservedCount: live.where((k) => k.status != 'served').length,
+  );
+});
+
 // Cart state for current order
 class CartItem {
   final MenuItem item;

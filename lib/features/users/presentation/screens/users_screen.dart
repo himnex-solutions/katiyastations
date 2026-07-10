@@ -21,6 +21,7 @@ import '../../../../core/network/api_client.dart';
 import '../../../../core/widgets/reset_password_dialog.dart';
 import '../../../../core/widgets/confirm_dialog.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
+import '../../../../core/widgets/notification_bell.dart';
 
 final branchUsersProvider = FutureProvider<List<Map<String, dynamic>>>((ref) async {
   final profile = ref.watch(authNotifierProvider).value;
@@ -202,6 +203,7 @@ class _UsersScreenState extends ConsumerState<UsersScreen> {
             label: const Text('Add User'),
             onPressed: _showAddDialog,
           ),
+          const NotificationBell(),
         ],
       ),
       body: Column(

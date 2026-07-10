@@ -8,6 +8,7 @@ import '../../../../core/utils/responsive_utils.dart';
 import '../../../../core/constants/api_constants.dart';
 import '../../../../core/network/api_client.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
+import '../../../../core/widgets/notification_bell.dart';
 
 final loyaltyCustomersProvider = FutureProvider<List<Map<String, dynamic>>>((ref) async {
   final profile = ref.watch(authNotifierProvider).value;
@@ -101,6 +102,7 @@ class _LoyaltyScreenState extends ConsumerState<LoyaltyScreen>
             label: const Text('Redeem Points'),
             onPressed: () => _showRedeemDialog(context),
           ),
+          const NotificationBell(),
         ],
       ),
       body: TabBarView(

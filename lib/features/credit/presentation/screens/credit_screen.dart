@@ -10,6 +10,7 @@ import '../../../../core/network/api_client.dart';
 import 'package:katiya_station_rms/features/cashier/domain/entities/bill_entities.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
 import '../../../dashboard/presentation/screens/dashboard_screen.dart';
+import '../../../../core/widgets/notification_bell.dart';
 
 final creditProvider = FutureProvider<List<CreditRecord>>((ref) async {
   final profile = ref.watch(authNotifierProvider).value;
@@ -65,6 +66,9 @@ class _CreditScreenState extends ConsumerState<CreditScreen> {
             ),
           ],
         ),
+        actions: const [
+          NotificationBell(),
+        ],
       ),
       body: Column(
         children: [

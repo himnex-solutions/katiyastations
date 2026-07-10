@@ -41,6 +41,8 @@ export const SocketRooms = {
   branch: (branchId: string) => `branch:${branchId}`,
   table: (tableId: string) => `table:${tableId}`,
   kitchen: (branchId: string) => `kitchen:${branchId}`,
+  /** Everyone in `branchId` holding `role` — how a notification finds its audience. */
+  role: (branchId: string, role: string) => `branch:${branchId}:role:${role}`,
 };
 
 @WebSocketGateway({
@@ -68,6 +70,14 @@ export class AppGateway implements OnGatewayConnection, OnGatewayDisconnect {
       });
 
       client.data.user = payload;
+
+      // Joined from the verified token, never from a client-supplied room
+      // name: a waiter must not be able to subscribe to the manager's alerts
+      // by emitting `join_room` with someone else's role.
+      if (payload.branchId) {
+        void client.join(SocketRooms.role(payload.branchId, payload.role));
+      }
+
       this.logger.log(`Client connected: ${client.id} (user ${payload.sub})`);
     } catch {
       this.logger.warn(`Rejected unauthenticated socket connection: ${client.id}`);

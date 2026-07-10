@@ -19,9 +19,10 @@ export class NotificationsController {
     return this.notificationsService.create(dto);
   }
 
+  /** Reading clears it: the row is deleted, not flagged. */
   @Patch(':id/read')
-  markRead(@Param('id') id: string) {
-    return this.notificationsService.markRead(id);
+  markRead(@CurrentUser() user: CurrentUserPayload, @Param('id') id: string) {
+    return this.notificationsService.markRead(user, id);
   }
 
   @Patch('mark-all-read')

@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
+import { ScheduleModule } from '@nestjs/schedule';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 
 import appConfig from './config/app.config';
@@ -52,6 +53,8 @@ import { SuperAdminModule } from './modules/super-admin/super-admin.module';
       load: [appConfig, databaseConfig, redisConfig, jwtConfig, minioConfig],
     }),
     ThrottlerModule.forRoot([{ ttl: 60_000, limit: 120 }]),
+    // Drives NotificationsService.purgeExpired — the 12-hour bell reset.
+    ScheduleModule.forRoot(),
     PrismaModule,
     // Imported here (not only by feature modules) so the global
     // RealtimeChangeInterceptor below can inject RealtimeService.

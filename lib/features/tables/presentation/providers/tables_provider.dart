@@ -51,18 +51,23 @@ final tableSessionProvider =
 });
 
 // ─── Reservations ───────────────────────────────────────────────────────────
+// Backs the Reservations tab on the tables screen. `/reservations` is
+// paginated — it answers `{ data: [...], meta: {...} }`, not a bare array —
+// so the envelope has to come off before the rows can be mapped. Reading it
+// as a List blew up with a TypeError the moment the tab was opened.
 final reservationsStreamProvider = FutureProvider<List<TableReservation>>((ref) async {
   final profile = ref.watch(authNotifierProvider).value;
   if (profile?.branchId == null) return [];
 
   final response = await ApiClient.instance.get(
     ApiConstants.reservations,
-    queryParameters: {'branchId': profile!.branchId!},
+    // Without this the server's default page of 20 silently truncates a busy
+    // evening's bookings. 100 is its `@Max(100)` ceiling.
+    queryParameters: {'branchId': profile!.branchId!, 'limit': '100'},
   );
-  final rows = response.data as List<dynamic>;
-  return rows
-      .map((r) => TableReservation.fromJson(r as Map<String, dynamic>))
-      .toList()
+  final data = response.data as Map<String, dynamic>;
+  final rows = List<Map<String, dynamic>>.from(data['data'] as List? ?? []);
+  return rows.map(TableReservation.fromJson).toList()
     ..sort((a, b) => a.reservationTime.compareTo(b.reservationTime));
 });
 
@@ -99,30 +104,37 @@ class TableNotifier extends StateNotifier<AsyncValue<void>> {
   }
 
   // ── Request Bill ────────────────────────────────────────────────────────
-  Future<bool> requestBill(String tableId, String sessionId) async {
+  /// Returns null when the request went through, otherwise the reason it was
+  /// refused — the server rejects a bill for food the kitchen hasn't served,
+  /// and that message names how many orders are still out.
+  Future<String?> requestBill(String tableId, String sessionId) async {
     state = const AsyncValue.loading();
     try {
       await ApiClient.instance.post(ApiConstants.requestBill(tableId));
       _invalidateAll(tableId);
       state = const AsyncValue.data(null);
-      return true;
+      return null;
     } catch (e) {
       state = AsyncValue.error(e.toString(), StackTrace.current);
-      return false;
+      return e.toString();
     }
   }
 
   // ── Close Session / Free Table ──────────────────────────────────────────
-  Future<bool> closeSession(String tableId, String sessionId) async {
+  /// Returns null when the table was freed, otherwise the reason it was
+  /// refused. The server rejects closing a table that still has orders on it,
+  /// and that message tells the waiter to request the bill instead — so it has
+  /// to reach the snackbar rather than being flattened into a bool.
+  Future<String?> closeSession(String tableId, String sessionId) async {
     state = const AsyncValue.loading();
     try {
       await ApiClient.instance.post(ApiConstants.closeSession(sessionId));
       _invalidateAll(tableId);
       state = const AsyncValue.data(null);
-      return true;
+      return null;
     } catch (e) {
       state = AsyncValue.error(e.toString(), StackTrace.current);
-      return false;
+      return e.toString();
     }
   }
 

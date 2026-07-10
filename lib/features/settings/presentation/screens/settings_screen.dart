@@ -10,6 +10,7 @@ import '../../../../core/printing/printer_status_pill.dart';
 import '../../../../core/printing/thermal_printer.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
 import '../../../branches/presentation/providers/branch_provider.dart';
+import '../../../../core/widgets/notification_bell.dart';
 
 class SettingsScreen extends ConsumerStatefulWidget {
   const SettingsScreen({super.key});
@@ -46,6 +47,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                     color: AppColors.textPrimary)),
           ],
         ),
+        actions: const [
+          NotificationBell(),
+        ],
       ),
       body: ResponsiveContent(
         alignment: Alignment.topLeft,

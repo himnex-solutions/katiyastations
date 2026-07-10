@@ -79,7 +79,11 @@ final realtimeSyncProvider = Provider<void>((ref) {
       case 'expenses':
         ref.invalidate(expensesProvider);
       case 'reservations':
+        // Two surfaces read the same endpoint: the standalone Reservations
+        // screen (raw maps) and the Reservations tab on the tables screen
+        // (typed entities). Refresh both or one of them shows stale bookings.
         ref.invalidate(reservationsProvider);
+        ref.invalidate(reservationsStreamProvider);
       case 'suppliers':
         ref.invalidate(suppliersProvider);
       case 'loyalty':

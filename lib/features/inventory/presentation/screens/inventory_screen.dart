@@ -9,6 +9,7 @@ import '../../../../core/constants/api_constants.dart';
 import '../../../../core/network/api_client.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
 import '../../domain/entities/inventory_entities.dart';
+import '../../../../core/widgets/notification_bell.dart';
 
 final inventoryProvider = FutureProvider<List<InventoryItem>>((ref) async {
   final profile = ref.watch(authNotifierProvider).value;
@@ -272,6 +273,7 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
         ),
         actions: [
           TextButton.icon(icon: const Icon(Icons.add_rounded, size: 18), label: const Text('Add Item'), onPressed: () => _showAddDialog(context)),
+          const NotificationBell(),
         ],
       ),
       body: Column(

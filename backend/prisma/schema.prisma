@@ -702,15 +702,25 @@ model StockMovement {
 
 // ── 29. Notifications ────────────────────────────────────────
 
+/// Rows are deleted, never archived: reading one removes it, and anything
+/// older than NOTIFICATION_TTL_HOURS is purged by NotificationsCleanupService.
 model Notification {
-  id        String   @id @default(uuid())
-  branchId  String   @map("branch_id")
-  title     String
-  body      String
-  isRead    Boolean  @default(false) @map("is_read")
+  id       String @id @default(uuid())
+  branchId String @map("branch_id")
+  title    String
+  body     String
+
+  /// Roles allowed to see this alert. Empty means every role in the branch.
+  audience String[] @default([])
+
+  /// The user whose write produced this alert. They already know it happened,
+  /// so their own bell never counts it.
+  actorId String? @map("actor_id")
+
   createdAt DateTime @default(now()) @map("created_at")
 
   branch Branch @relation(fields: [branchId], references: [id], onDelete: Cascade)
 
+  @@index([branchId, createdAt])
   @@map("notifications")
 }

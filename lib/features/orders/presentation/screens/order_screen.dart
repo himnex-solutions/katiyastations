@@ -13,6 +13,7 @@ import '../../domain/entities/order_entities.dart';
 import '../../../menu/domain/entities/menu_entities.dart';
 
 import '../../../tables/presentation/providers/tables_provider.dart';
+import '../../../../core/widgets/notification_bell.dart';
 
 class OrderScreen extends ConsumerStatefulWidget {
   final String tableId;
@@ -140,11 +141,30 @@ class _OrderScreenState extends ConsumerState<OrderScreen>
                       ),
                     );
                   } else {
-                    return TextButton.icon(
-                      icon: const Icon(Icons.receipt_long_rounded, size: 16, color: AppColors.warning),
-                      label: Text('Request Bill', style: GoogleFonts.outfit(color: AppColors.warning)),
-                      onPressed: _handleRequestBill,
-                      style: TextButton.styleFrom(foregroundColor: AppColors.warning),
+                    // Same gate as the tables screen: the guest can only be
+                    // billed for food the kitchen has marked served. Watching
+                    // the provider means this button lights up the moment the
+                    // last order goes out, without leaving the screen.
+                    final orders =
+                        ref.watch(sessionOrderStateProvider(widget.sessionId));
+                    return Tooltip(
+                      message: orders.billBlockedReason ?? 'Request Bill',
+                      child: TextButton.icon(
+                        icon: Icon(Icons.receipt_long_rounded,
+                            size: 16,
+                            color: orders.canRequestBill
+                                ? AppColors.warning
+                                : AppColors.textHint),
+                        label: Text('Request Bill',
+                            style: GoogleFonts.outfit(
+                                color: orders.canRequestBill
+                                    ? AppColors.warning
+                                    : AppColors.textHint)),
+                        onPressed:
+                            orders.canRequestBill ? _handleRequestBill : null,
+                        style: TextButton.styleFrom(
+                            foregroundColor: AppColors.warning),
+                      ),
                     );
                   }
                 } else if (profile?.isCashier == true || profile?.isBranchManager == true) {
@@ -161,6 +181,7 @@ class _OrderScreenState extends ConsumerState<OrderScreen>
             ),
             const SizedBox(width: 8),
           ],
+          const NotificationBell(),
         ],
       ),
       // ── Mobile layout: full-screen menu + FAB cart button ───────────────
@@ -844,29 +865,34 @@ class _OrderScreenState extends ConsumerState<OrderScreen>
 
   Future<void> _handleRequestBill() async {
     final messenger = ScaffoldMessenger.of(context);
-    try {
-      final success = await ref
-          .read(tableNotifierProvider.notifier)
-          .requestBill(widget.tableId, widget.sessionId);
-      if (success && mounted) {
-        messenger.showSnackBar(
-          const SnackBar(
-            content: Row(
-              children: [
-                Icon(Icons.check_circle, color: AppColors.warning),
-                SizedBox(width: 10),
-                Text('Bill request sent to cashier!'),
-              ],
-            ),
-            backgroundColor: AppColors.surfaceVariant,
-          ),
-        );
-      }
-    } catch (e) {
-      messenger.showSnackBar(
-        SnackBar(content: Text('Error requesting bill: $e'), backgroundColor: AppColors.error),
-      );
+    // Null means the request went through; anything else is the server's
+    // reason — most often that the kitchen still has orders to serve.
+    final error = await ref
+        .read(tableNotifierProvider.notifier)
+        .requestBill(widget.tableId, widget.sessionId);
+    if (!mounted) return;
+
+    if (error != null) {
+      messenger.showSnackBar(SnackBar(
+        content: Text(error),
+        duration: const Duration(seconds: 4),
+        backgroundColor: AppColors.error,
+      ));
+      return;
     }
+
+    messenger.showSnackBar(
+      const SnackBar(
+        content: Row(
+          children: [
+            Icon(Icons.check_circle, color: AppColors.warning),
+            SizedBox(width: 10),
+            Text('Bill request sent to cashier!'),
+          ],
+        ),
+        backgroundColor: AppColors.surfaceVariant,
+      ),
+    );
   }
 
   Future<void> _sendKot(dynamic profile) async {

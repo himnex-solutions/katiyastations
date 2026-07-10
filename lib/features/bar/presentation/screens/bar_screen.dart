@@ -9,6 +9,7 @@ import '../../../../core/constants/api_constants.dart';
 import '../../../../core/network/api_client.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
 import '../../../inventory/domain/entities/inventory_entities.dart';
+import '../../../../core/widgets/notification_bell.dart';
 
 final barStockProvider = FutureProvider<List<BarStockItem>>((ref) async {
   final profile = ref.watch(authNotifierProvider).value;
@@ -64,6 +65,7 @@ class BarScreen extends ConsumerWidget {
             label: const Text('Add Stock'),
             onPressed: () => _showAddDialog(context, ref),
           ),
+          const NotificationBell(),
         ],
       ),
       body: stockAsync.when(

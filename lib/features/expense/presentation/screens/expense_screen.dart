@@ -10,6 +10,7 @@ import '../../../../core/constants/api_constants.dart';
 import '../../../../core/network/api_client.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
 import '../../../dashboard/presentation/screens/dashboard_screen.dart';
+import '../../../../core/widgets/notification_bell.dart';
 
 const _categories = ['Rent', 'Electricity', 'Internet', 'Gas', 'Salaries', 'Maintenance', 'Miscellaneous'];
 
@@ -71,6 +72,7 @@ class _ExpenseScreenState extends ConsumerState<ExpenseScreen> {
         ),
         actions: [
           TextButton.icon(icon: const Icon(Icons.add_rounded, size: 18), label: const Text('Add Expense'), onPressed: () => _showAddDialog(context)),
+          const NotificationBell(),
         ],
       ),
       body: Column(

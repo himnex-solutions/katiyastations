@@ -19,6 +19,7 @@ import '../../../auth/presentation/providers/auth_provider.dart';
 import '../../../branches/presentation/providers/branch_provider.dart';
 import '../../../purchase/presentation/screens/purchase_screen.dart' show purchasesProvider;
 import '../report_export.dart';
+import '../../../../core/widgets/notification_bell.dart';
 
 const _timeframes = ['Daily', 'Weekly', 'Monthly', 'Yearly'];
 
@@ -238,6 +239,7 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
             onPressed: _loading ? null : _load,
           ),
           const SizedBox(width: 8),
+          const NotificationBell(),
         ],
       ),
       body: _loading

@@ -8,13 +8,15 @@ import '../../../../core/utils/responsive_utils.dart';
 import '../../../../core/constants/api_constants.dart';
 import '../../../../core/network/api_client.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
+import '../../../../core/widgets/notification_bell.dart';
 
 final reservationsProvider = FutureProvider<List<Map<String, dynamic>>>((ref) async {
   final profile = ref.watch(authNotifierProvider).value;
   if (profile?.branchId == null) return [];
   final response = await ApiClient.instance.get(
     ApiConstants.reservations,
-    queryParameters: {'branchId': profile!.branchId!},
+    // The server pages at 20 by default; 100 is its `@Max(100)` ceiling.
+    queryParameters: {'branchId': profile!.branchId!, 'limit': '100'},
   );
   final data = response.data as Map<String, dynamic>;
   return List<Map<String, dynamic>>.from(data['data'] as List? ?? []);
@@ -62,6 +64,7 @@ class _ReservationScreenState extends ConsumerState<ReservationScreen> {
         ),
         actions: [
           TextButton.icon(icon: const Icon(Icons.add_rounded, size: 18), label: const Text('New Reservation'), onPressed: () => _showAddDialog(context)),
+          const NotificationBell(),
         ],
       ),
       body: Column(

@@ -8,6 +8,7 @@ import '../../../../core/constants/api_constants.dart';
 import '../../../../core/network/api_client.dart';
 import '../../../../core/network/refresh_signals.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
+import '../../../../core/widgets/notification_bell.dart';
 
 class AttendanceScreen extends ConsumerStatefulWidget {
   const AttendanceScreen({super.key});
@@ -104,6 +105,9 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> {
                     color: AppColors.textPrimary)),
           ],
         ),
+        actions: const [
+          NotificationBell(),
+        ],
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator(color: AppColors.primary))

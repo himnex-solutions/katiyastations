@@ -15,6 +15,7 @@ import '../../../dashboard/presentation/screens/dashboard_screen.dart';
 import '../../../payment_history/presentation/screens/payment_history_screen.dart';
 import '../../../branches/presentation/providers/branch_provider.dart';
 import '../../../../core/widgets/thermal_receipt.dart';
+import '../../../../core/widgets/notification_bell.dart';
 
 // Session billing data provider (KOTs + aggregated items for this session)
 // Public (no leading underscore) so realtime_sync.dart can invalidate it
@@ -339,6 +340,7 @@ class _CashierScreenState extends ConsumerState<CashierScreen>
             );
           },
         ),
+        const NotificationBell(),
       ],
       bottom: PreferredSize(
         preferredSize: const Size.fromHeight(1),

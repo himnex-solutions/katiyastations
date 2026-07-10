@@ -9,10 +9,10 @@ import '../../../../core/constants/app_constants.dart';
 import '../../../../core/constants/api_constants.dart';
 import '../../../../core/network/api_client.dart';
 import '../../../../core/utils/responsive_utils.dart';
+import '../../../../core/widgets/notification_bell.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
 import '../../../tables/presentation/providers/tables_provider.dart';
 import '../../../kitchen/presentation/providers/kitchen_provider.dart';
-import '../../../notifications/presentation/screens/notifications_screen.dart';
 
 // ── Dashboard stat providers ──
 final dashboardBillsProvider = FutureProvider<List<Map<String, dynamic>>>((ref) async {
@@ -92,22 +92,8 @@ class DashboardScreen extends ConsumerWidget {
                         style: GoogleFonts.outfit(fontSize: 12, color: AppColors.textSecondary)),
                   ],
                 ),
-                actions: [
-                  Consumer(builder: (context, ref, _) {
-                    final unread = ref.watch(unreadNotificationCountProvider);
-                    return IconButton(
-                      tooltip: 'Notifications',
-                      icon: Badge(
-                        isLabelVisible: unread > 0,
-                        label: Text(unread > 99 ? '99+' : '$unread'),
-                        backgroundColor: AppColors.error,
-                        textColor: Colors.white,
-                        child: const Icon(Icons.notifications_outlined, color: AppColors.textSecondary),
-                      ),
-                      onPressed: () => context.go('/notifications'),
-                    );
-                  }),
-                  const SizedBox(width: 8),
+                actions: const [
+                  NotificationBell(),
                 ],
               ),
               SliverToBoxAdapter(

@@ -10,6 +10,7 @@ import '../../../../core/constants/api_constants.dart';
 import '../../../../core/network/api_client.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
 import '../../../suppliers/presentation/screens/supplier_screen.dart' show suppliersProvider;
+import '../../../../core/widgets/notification_bell.dart';
 
 final purchasesProvider = FutureProvider<List<Map<String, dynamic>>>((ref) async {
   final profile = ref.watch(authNotifierProvider).value;
@@ -83,6 +84,7 @@ class _PurchaseScreenState extends ConsumerState<PurchaseScreen> {
         ),
         actions: [
           TextButton.icon(icon: const Icon(Icons.add_rounded, size: 18), label: const Text('New Purchase'), onPressed: () => _showAddDialog(context)),
+          const NotificationBell(),
         ],
       ),
       body: Column(

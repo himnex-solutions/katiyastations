@@ -10,6 +10,7 @@ import '../../../../core/constants/api_constants.dart';
 import '../../../../core/network/api_client.dart';
 import '../../../../core/network/refresh_signals.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
+import '../../../../core/widgets/notification_bell.dart';
 
 class ShiftClosingScreen extends ConsumerStatefulWidget {
   const ShiftClosingScreen({super.key});
@@ -108,6 +109,7 @@ class _ShiftClosingScreenState extends ConsumerState<ShiftClosingScreen> {
             label: const Text('Refresh'),
             onPressed: _loadTodaySummary,
           ),
+          const NotificationBell(),
         ],
       ),
       body: _loading

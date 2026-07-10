@@ -168,6 +168,29 @@ export class TablesService {
       throw new BadRequestException('This table has no active session');
     }
 
+    // A bill can only be asked for once the food is actually on the table.
+    // The kitchen walks each KOT pending -> preparing -> ready -> served, and
+    // 'served' is the only status that means the guest has it. Cancelled KOTs
+    // are ignored — they were voided and nobody is waiting on them. Enforced
+    // here as well as in the UI, because the endpoint is open to every
+    // front-of-house role.
+    const kots = await this.prisma.kot.findMany({
+      where: { sessionId: table.currentSessionId, status: { not: 'cancelled' } },
+      select: { status: true },
+    });
+    if (kots.length === 0) {
+      throw new BadRequestException(
+        'This table has no orders to bill. Use "Close & Free Table" instead.',
+      );
+    }
+    const unserved = kots.filter((k) => k.status !== 'served').length;
+    if (unserved > 0) {
+      throw new BadRequestException(
+        `${unserved} order(s) on this table have not been served yet. ` +
+          'The kitchen must mark every order as served before the bill can be requested.',
+      );
+    }
+
     const now = new Date();
     const [updatedTable] = await this.prisma.$transaction([
       this.prisma.restaurantTable.update({

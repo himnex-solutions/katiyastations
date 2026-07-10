@@ -11,6 +11,7 @@ import '../../../auth/presentation/providers/auth_provider.dart';
 import '../providers/tables_provider.dart';
 import '../../domain/entities/table_entities.dart';
 import '../../../orders/presentation/providers/order_provider.dart';
+import '../../../../core/widgets/notification_bell.dart';
 
 class TablesScreen extends ConsumerStatefulWidget {
   const TablesScreen({super.key});
@@ -77,6 +78,7 @@ class _TablesScreenState extends ConsumerState<TablesScreen>
               tooltip: 'Add Table',
               onPressed: () => _showAddTableDialog(context),
             ),
+          const NotificationBell(),
         ],
         bottom: TabBar(
           controller: _tabController,
@@ -146,6 +148,12 @@ class _TablesScreenState extends ConsumerState<TablesScreen>
             content: Text('Table is reserved. Convert from Reservations tab.'),
             backgroundColor: AppColors.tableReserved),
       );
+    } else {
+      // Any remaining status carries no live session — 'cleaning', say, which
+      // a manager can still set by hand. These used to fall off the end of the
+      // chain and make the tap do nothing at all, leaving the table
+      // unbookable with no way back.
+      await _showOpenSessionDialog(context, table);
     }
   }
 
@@ -377,22 +385,36 @@ class _TablesScreenState extends ConsumerState<TablesScreen>
                       }
                     },
                   ),
-                _ActionTile(
-                  icon: Icons.receipt_long_rounded,
-                  label: 'Request Bill',
-                  color: AppColors.warning,
-                  onTap: () async {
-                    Navigator.pop(ctx);
-                    await ref
-                        .read(tableNotifierProvider.notifier)
-                        .requestBill(table.id, session.id);
-                    if (context.mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                          content: Text('Bill requested!'),
-                          backgroundColor: AppColors.warning));
-                    }
-                  },
-                ),
+                // The guest can only be billed for food they actually have, so
+                // this unlocks when the kitchen marks the last order served.
+                // Watching [sessionOrderStateProvider] means it unlocks live,
+                // while the dialog is open.
+                Consumer(builder: (_, tileRef, __) {
+                  final orders =
+                      tileRef.watch(sessionOrderStateProvider(session.id));
+                  return _ActionTile(
+                    icon: Icons.receipt_long_rounded,
+                    label: 'Request Bill',
+                    color: AppColors.warning,
+                    enabled: orders.canRequestBill,
+                    subtitle: orders.billBlockedReason,
+                    onTap: () async {
+                      Navigator.pop(ctx);
+                      final error = await ref
+                          .read(tableNotifierProvider.notifier)
+                          .requestBill(table.id, session.id);
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                            content: Text(error ?? 'Bill requested!'),
+                            duration:
+                                Duration(seconds: error == null ? 2 : 4),
+                            backgroundColor: error == null
+                                ? AppColors.warning
+                                : AppColors.error));
+                      }
+                    },
+                  );
+                }),
                 _ActionTile(
                   icon: Icons.swap_horiz_rounded,
                   label: 'Transfer Table',
@@ -432,15 +454,24 @@ class _TablesScreenState extends ConsumerState<TablesScreen>
                         '/cashier?sessionId=${session.id}&tableId=${table.id}');
                   },
                 ),
-                _ActionTile(
-                  icon: Icons.close_rounded,
-                  label: 'Close & Free Table',
-                  color: AppColors.error,
-                  onTap: () {
-                    Navigator.pop(ctx);
-                    _confirmCloseSession(context, table, session);
-                  },
-                ),
+                // Freeing a table collects no money, so it's only offered while
+                // nothing has been ordered. Greys out the instant a waiter
+                // sends an order, from this device or any other.
+                Consumer(builder: (_, tileRef, __) {
+                  final orders =
+                      tileRef.watch(sessionOrderStateProvider(session.id));
+                  return _ActionTile(
+                    icon: Icons.close_rounded,
+                    label: 'Close & Free Table',
+                    color: AppColors.error,
+                    enabled: orders.canFreeTable,
+                    subtitle: orders.freeBlockedReason,
+                    onTap: () {
+                      Navigator.pop(ctx);
+                      _confirmCloseSession(context, table, session);
+                    },
+                  );
+                }),
               ],
             ),
           ),
@@ -855,13 +886,15 @@ class _TablesScreenState extends ConsumerState<TablesScreen>
       icon: Icons.event_available_rounded,
     );
     if (!confirmed || !context.mounted) return;
-    final ok = await ref
+    final error = await ref
         .read(tableNotifierProvider.notifier)
         .closeSession(table.id, session.id);
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(ok ? 'Table freed!' : 'Failed to close session'),
-          backgroundColor: ok ? AppColors.success : AppColors.error));
+          content: Text(error ?? 'Table freed!'),
+          duration: Duration(seconds: error == null ? 2 : 4),
+          backgroundColor:
+              error == null ? AppColors.success : AppColors.error));
     }
   }
 

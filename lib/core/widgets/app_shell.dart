@@ -6,36 +6,9 @@ import 'package:responsive_framework/responsive_framework.dart';
 import '../constants/app_colors.dart';
 import 'confirm_dialog.dart';
 import '../../features/auth/presentation/providers/auth_provider.dart';
-import '../../features/notifications/presentation/screens/notifications_screen.dart';
 import '../../router/app_router.dart';
 import '../network/realtime_sync.dart';
 import '../printing/kot_auto_print.dart';
-
-const String _notificationsPath = '/notifications';
-
-/// Red count badge shown on every bell in the app. Reads
-/// [unreadNotificationCountProvider], which the realtime layer refreshes on
-/// each `notification:new`, so the badge appears without a reload.
-class _BellIcon extends ConsumerWidget {
-  final bool isActive;
-  const _BellIcon({required this.isActive});
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final unread = ref.watch(unreadNotificationCountProvider);
-    return Badge(
-      isLabelVisible: unread > 0,
-      label: Text(unread > 99 ? '99+' : '$unread'),
-      backgroundColor: AppColors.error,
-      textColor: Colors.white,
-      child: Icon(
-        isActive ? Icons.notifications_rounded : Icons.notifications_outlined,
-        color: isActive ? AppColors.primary : AppColors.textSecondary,
-        size: 20,
-      ),
-    );
-  }
-}
 
 class AppShell extends ConsumerWidget {
   final Widget child;
@@ -95,9 +68,9 @@ class AppShell extends ConsumerWidget {
     }
 
     // Mobile / Tablet: bottom nav with "More" overflow.
-    // 3 rather than 4 so that "More" + "Alerts" still fit inside Material's
+    // 4 rather than 5 so that "More" still fits inside Material's
     // 5-destination guidance for a NavigationBar.
-    const maxVisible = 3;
+    const maxVisible = 4;
     final visibleItems = navItems.length <= maxVisible
         ? navItems
         : navItems.take(maxVisible).toList();
@@ -110,17 +83,12 @@ class AppShell extends ConsumerWidget {
         .indexWhere((i) => currentPath.startsWith(i.path));
     final isInOverflow = currentIdx < 0 &&
         overflowItems.any((i) => currentPath.startsWith(i.path));
-    final isOnNotifications = currentPath.startsWith(_notificationsPath);
 
-    // Tab order: [...visible, More?, Alerts]
+    // Tab order: [...visible, More?]
     final moreIndex = overflowItems.isNotEmpty ? visibleItems.length : -1;
-    final alertsIndex =
-        visibleItems.length + (overflowItems.isNotEmpty ? 1 : 0);
-    final selectedIndex = isOnNotifications
-        ? alertsIndex
-        : isInOverflow
-            ? moreIndex
-            : (currentIdx < 0 ? 0 : currentIdx);
+    final selectedIndex = isInOverflow
+        ? moreIndex
+        : (currentIdx < 0 ? 0 : currentIdx);
 
     return Scaffold(
       body: child,
@@ -131,9 +99,7 @@ class AppShell extends ConsumerWidget {
         backgroundColor: AppColors.surface,
         indicatorColor: AppColors.primary.withValues(alpha: 0.12),
         onDestinationSelected: (i) {
-          if (i == alertsIndex) {
-            context.go(_notificationsPath);
-          } else if (overflowItems.isNotEmpty && i == moreIndex) {
+          if (overflowItems.isNotEmpty && i == moreIndex) {
             _showMoreSheet(context, overflowItems, ref);
           } else if (i < visibleItems.length) {
             context.go(visibleItems[i].path);
@@ -153,11 +119,6 @@ class AppShell extends ConsumerWidget {
                   color: AppColors.primary),
               label: 'More',
             ),
-          const NavigationDestination(
-            icon: _BellIcon(isActive: false),
-            selectedIcon: _BellIcon(isActive: true),
-            label: 'Alerts',
-          ),
         ],
       ),
     );
@@ -405,11 +366,6 @@ class _SideNavRailState extends State<_SideNavRail> {
             child: ListView(
               padding: const EdgeInsets.symmetric(vertical: 8),
               children: [
-                _BellNavTile(
-                  collapsed: _collapsed,
-                  isActive:
-                      widget.currentPath.startsWith(_notificationsPath),
-                ),
                 ...widget.navItems.map((item) {
                   final isActive = widget.currentPath.startsWith(item.path);
                   return _NavTile(
@@ -463,73 +419,6 @@ class _SideNavRailState extends State<_SideNavRail> {
             ),
           ),
         ],
-      ),
-    );
-  }
-}
-
-/// Notifications entry for the desktop rail. Kept separate from [_NavTile]
-/// because it isn't a role-gated [NavItem] — every signed-in user sees their
-/// branch's alerts — and it carries the unread badge.
-class _BellNavTile extends StatelessWidget {
-  final bool collapsed;
-  final bool isActive;
-  const _BellNavTile({required this.collapsed, required this.isActive});
-
-  @override
-  Widget build(BuildContext context) {
-    return Tooltip(
-      message: collapsed ? 'Notifications' : '',
-      preferBelow: false,
-      child: GestureDetector(
-        onTap: () => context.go(_notificationsPath),
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 150),
-          margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-          padding: EdgeInsets.symmetric(
-              horizontal: collapsed ? 12 : 16, vertical: 10),
-          decoration: BoxDecoration(
-            color: isActive
-                ? AppColors.primary.withValues(alpha: 0.12)
-                : Colors.transparent,
-            borderRadius: BorderRadius.circular(10),
-            border: isActive
-                ? Border.all(color: AppColors.primary.withValues(alpha: 0.25))
-                : null,
-          ),
-          child: Row(
-            mainAxisAlignment: collapsed
-                ? MainAxisAlignment.center
-                : MainAxisAlignment.start,
-            children: [
-              if (!collapsed)
-                AnimatedContainer(
-                  duration: const Duration(milliseconds: 150),
-                  width: 3,
-                  height: 20,
-                  margin: const EdgeInsets.only(right: 12),
-                  decoration: BoxDecoration(
-                    color: isActive ? AppColors.primary : Colors.transparent,
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                ),
-              _BellIcon(isActive: isActive),
-              if (!collapsed) ...[
-                const SizedBox(width: 10),
-                Text(
-                  'Notifications',
-                  style: GoogleFonts.outfit(
-                    fontSize: 14,
-                    fontWeight: isActive ? FontWeight.w600 : FontWeight.w400,
-                    color: isActive
-                        ? AppColors.textPrimary
-                        : AppColors.textSecondary,
-                  ),
-                ),
-              ],
-            ],
-          ),
-        ),
       ),
     );
   }

@@ -8,6 +8,7 @@ import '../../../../core/constants/api_constants.dart';
 import '../../../../core/network/api_client.dart';
 import '../../../../core/network/refresh_signals.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
+import '../../../../core/widgets/notification_bell.dart';
 
 class CustomersScreen extends ConsumerStatefulWidget {
   const CustomersScreen({super.key});
@@ -77,6 +78,7 @@ class _CustomersScreenState extends ConsumerState<CustomersScreen> {
         ),
         actions: [
           TextButton.icon(icon: const Icon(Icons.person_add_rounded, size: 18), label: const Text('Add Customer'), onPressed: () => _showAddDialog(context)),
+          const NotificationBell(),
         ],
       ),
       body: Column(

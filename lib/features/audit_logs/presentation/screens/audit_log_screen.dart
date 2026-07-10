@@ -9,6 +9,7 @@ import '../../../../core/constants/app_colors.dart';
 import '../../../../core/constants/api_constants.dart';
 import '../../../../core/network/api_client.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
+import '../../../../core/widgets/notification_bell.dart';
 
 final auditLogsProvider = FutureProvider<List<Map<String, dynamic>>>((ref) async {
   final profile = ref.watch(authNotifierProvider).value;
@@ -211,6 +212,7 @@ class _AuditLogScreenState extends ConsumerState<AuditLogScreen> {
             icon: const Icon(Icons.refresh_rounded),
             onPressed: () => ref.invalidate(auditLogsProvider),
           ),
+          const NotificationBell(),
         ],
       ),
       body: Column(

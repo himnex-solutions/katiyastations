@@ -12,6 +12,7 @@ import '../../../../core/network/api_client.dart';
 import '../../../../core/network/refresh_signals.dart';
 import '../../../../core/utils/responsive_utils.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
+import '../../../../core/widgets/notification_bell.dart';
 
 class StaffScreen extends ConsumerStatefulWidget {
   const StaffScreen({super.key});
@@ -91,6 +92,7 @@ class _StaffScreenState extends ConsumerState<StaffScreen> with SingleTickerProv
             label: const Text('Add Staff'),
             onPressed: _addingStaff ? null : () => _showAddDialog(context),
           ),
+          const NotificationBell(),
         ],
         bottom: TabBar(
           controller: _tabs,

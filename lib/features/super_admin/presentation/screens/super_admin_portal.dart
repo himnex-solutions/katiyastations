@@ -14,6 +14,7 @@ import '../../../../core/constants/api_constants.dart';
 import '../../../../core/network/api_client.dart';
 import '../../../../core/utils/responsive_utils.dart';
 import '../../../../core/widgets/reset_password_dialog.dart';
+import '../../../../core/widgets/notification_bell.dart';
 
 final allUsersProvider = FutureProvider<List<Map<String, dynamic>>>((ref) async {
   final response = await ApiClient.instance.get(
@@ -112,6 +113,7 @@ class _SuperAdminPortalState extends ConsumerState<SuperAdminPortal>
             label: const Text('Create User'),
             onPressed: () => _showCreateUserDialog(context),
           ),
+          const NotificationBell(),
         ],
       ),
       body: TabBarView(

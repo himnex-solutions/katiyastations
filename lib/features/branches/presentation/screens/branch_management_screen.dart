@@ -9,6 +9,7 @@ import '../../../../core/widgets/confirm_dialog.dart';
 import '../../../../core/constants/api_constants.dart';
 import '../../../../core/network/api_client.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
+import '../../../../core/widgets/notification_bell.dart';
 
 final branchesProvider = FutureProvider<List<Map<String, dynamic>>>((ref) async {
   final response = await ApiClient.instance.get(ApiConstants.branches);
@@ -61,6 +62,7 @@ class BranchManagementScreen extends ConsumerWidget {
               label: const Text('Add Branch'),
               onPressed: () => _showBranchDialog(context, ref, null),
             ),
+          const NotificationBell(),
         ],
       ),
       body: branchesAsync.when(

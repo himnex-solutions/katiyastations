@@ -9,11 +9,14 @@ import '../../../../core/constants/api_constants.dart';
 import '../../../../core/network/api_client.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
 
-/// The backend pages at 20 by default. Every write now records an activity
-/// notification, so a busy service would peg the unread badge at "20" and
-/// hide everything older. 100 is the server's `@Max(100)` ceiling.
+/// The backend pages at 20 by default. 100 is the server's `@Max(100)` ceiling
+/// — comfortably above what a 12-hour window can accumulate for one role.
 const int _notificationPageSize = 100;
 
+/// The server only ever returns alerts addressed to the caller's role, minus
+/// the ones they caused themselves, minus anything older than 12 hours. So
+/// every row that arrives here is unread by construction — reading one deletes
+/// it server-side rather than flagging it.
 final notificationsProvider = FutureProvider<List<Map<String, dynamic>>>((ref) async {
   final profile = ref.watch(authNotifierProvider).value;
   if (profile?.branchId == null) return [];
@@ -30,23 +33,51 @@ final notificationsProvider = FutureProvider<List<Map<String, dynamic>>>((ref) a
   return rows;
 });
 
-/// Unread notification count, kept live off [notificationsProvider] (which the
-/// realtime sync invalidates on every `notification:new` / low-stock event).
+/// Drives the red count on every bell. Kept live off [notificationsProvider],
+/// which the realtime layer invalidates on every `notification:new` addressed
+/// to this user's role.
 final unreadNotificationCountProvider = Provider<int>((ref) {
-  final rows = ref.watch(notificationsProvider).valueOrNull ?? const [];
-  return rows.where((n) => n['is_read'] != true).length;
+  return ref.watch(notificationsProvider).valueOrNull?.length ?? 0;
 });
 
-Future<void> _markRead(WidgetRef ref, String id) async {
-  await ApiClient.instance.patch(ApiConstants.markNotificationRead(id));
+/// `created_at` arrives as a UTC ISO-8601 instant. Rendering it without
+/// [DateTime.toLocal] shows Kathmandu staff a clock 5h45m behind the wall.
+DateTime? _localTime(Object? raw) {
+  if (raw is! String) return null;
+  return DateTime.tryParse(raw)?.toLocal();
+}
+
+/// Alerts live at most 12 hours, so they either happened today or late
+/// yesterday — the day only needs spelling out in the second case.
+String _timestampLabel(DateTime when) {
+  final now = DateTime.now();
+  final isToday = when.year == now.year && when.month == now.month && when.day == now.day;
+  return isToday
+      ? DateFormat('hh:mm a').format(when)
+      : DateFormat('dd MMM, hh:mm a').format(when);
+}
+
+/// Reading clears it. A 404 means it expired or another device on the same
+/// role already cleared it — either way the list just needs to catch up.
+Future<void> _dismiss(WidgetRef ref, String id) async {
+  try {
+    await ApiClient.instance.patch(ApiConstants.markNotificationRead(id));
+  } catch (_) {
+    // Swallowed on purpose: the only failure that matters here is "it's
+    // already gone", and the refetch below settles the list either way.
+  }
   ref.invalidate(notificationsProvider);
 }
 
-Future<void> _markAllRead(WidgetRef ref, String branchId) async {
-  await ApiClient.instance.patch(
-    ApiConstants.markAllRead,
-    queryParameters: {'branchId': branchId},
-  );
+Future<void> _dismissAll(WidgetRef ref, String branchId) async {
+  try {
+    await ApiClient.instance.patch(
+      ApiConstants.markAllRead,
+      queryParameters: {'branchId': branchId},
+    );
+  } catch (_) {
+    // As above.
+  }
   ref.invalidate(notificationsProvider);
 }
 
@@ -86,7 +117,7 @@ class NotificationsScreen extends ConsumerWidget {
         actions: [
           if (unread > 0 && branchId != null)
             TextButton.icon(
-              onPressed: () => _markAllRead(ref, branchId),
+              onPressed: () => _dismissAll(ref, branchId),
               icon: const Icon(Icons.done_all_rounded, size: 17),
               label: Text('Mark all read',
                   style: GoogleFonts.outfit(
@@ -104,51 +135,66 @@ class NotificationsScreen extends ConsumerWidget {
                 const Icon(Icons.notifications_none_rounded, size: 64, color: AppColors.textHint),
                 const SizedBox(height: 16),
                 Text('No notifications', style: GoogleFonts.outfit(color: AppColors.textSecondary)),
+                const SizedBox(height: 6),
+                Text('Alerts meant for you appear here, and clear after 12 hours.',
+                    textAlign: TextAlign.center,
+                    style: GoogleFonts.outfit(fontSize: 12, color: AppColors.textHint)),
               ]))
             : ResponsiveContent(child: ListView.builder(
                 padding: const EdgeInsets.all(16),
                 itemCount: rows.length,
                 itemBuilder: (ctx, i) {
                   final n = rows[i];
-                  final isRead = n['is_read'] as bool? ?? false;
+                  final id = n['id'] as String;
+                  final when = _localTime(n['created_at']);
+                  final title = (n['title'] ?? 'Notification').toString();
+                  final isAlert = title.toLowerCase().contains('stock');
+
                   return GestureDetector(
-                    onTap: isRead
-                        ? null
-                        : () => _markRead(ref, n['id'] as String),
+                    onTap: () => _dismiss(ref, id),
                     child: Container(
-                    margin: const EdgeInsets.only(bottom: 10),
-                    padding: const EdgeInsets.all(14),
-                    decoration: BoxDecoration(
-                      color: isRead ? AppColors.card : AppColors.card.withValues(alpha: 0.8),
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: isRead ? AppColors.border : AppColors.primary.withValues(alpha: 0.3)),
+                      margin: const EdgeInsets.only(bottom: 10),
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: AppColors.card,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: AppColors.primary.withValues(alpha: 0.3)),
+                      ),
+                      child: Row(children: [
+                        Container(
+                          width: 40, height: 40,
+                          decoration: BoxDecoration(
+                            color: AppColors.primary.withValues(alpha: 0.1),
+                            shape: BoxShape.circle,
+                          ),
+                          child: Icon(
+                            isAlert ? Icons.warning_rounded : Icons.info_rounded,
+                            color: AppColors.primary,
+                            size: 20,
+                          ),
+                        ),
+                        const SizedBox(width: 14),
+                        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                          Text(title,
+                              style: GoogleFonts.outfit(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+                          const SizedBox(height: 2),
+                          Text(n['body'] ?? '', style: GoogleFonts.outfit(fontSize: 12, color: AppColors.textSecondary)),
+                          if (when != null) ...[
+                            const SizedBox(height: 4),
+                            Text(_timestampLabel(when),
+                                style: GoogleFonts.outfit(fontSize: 10, color: AppColors.textHint)),
+                          ],
+                        ])),
+                        const SizedBox(width: 8),
+                        IconButton(
+                          tooltip: 'Mark as read',
+                          visualDensity: VisualDensity.compact,
+                          icon: const Icon(Icons.check_circle_outline_rounded,
+                              size: 20, color: AppColors.textSecondary),
+                          onPressed: () => _dismiss(ref, id),
+                        ),
+                      ]),
                     ),
-                    child: Row(children: [
-                      Container(
-                        width: 40, height: 40,
-                        decoration: BoxDecoration(
-                          color: (isRead ? AppColors.textSecondary : AppColors.primary).withValues(alpha: 0.1),
-                          shape: BoxShape.circle,
-                        ),
-                        child: Icon(
-                          n['type'] == 'alert' ? Icons.warning_rounded : Icons.info_rounded,
-                          color: isRead ? AppColors.textSecondary : AppColors.primary,
-                          size: 20,
-                        ),
-                      ),
-                      const SizedBox(width: 14),
-                      Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                        Text(n['title'] ?? 'Notification', style: GoogleFonts.outfit(fontSize: 13, fontWeight: isRead ? FontWeight.w500 : FontWeight.w700, color: AppColors.textPrimary)),
-                        const SizedBox(height: 2),
-                        Text(n['body'] ?? '', style: GoogleFonts.outfit(fontSize: 12, color: AppColors.textSecondary)),
-                      ])),
-                      const SizedBox(width: 8),
-                      Text(
-                        n['created_at'] != null ? DateFormat('hh:mm a').format(DateTime.parse(n['created_at'] as String)) : '',
-                        style: GoogleFonts.outfit(fontSize: 10, color: AppColors.textHint),
-                      ),
-                    ]),
-                  ),
                   ).animate().fadeIn(delay: Duration(milliseconds: i * 25));
                 },
               )),

@@ -57,6 +57,26 @@ export class SessionsService {
       throw new BadRequestException('This session is already closed');
     }
 
+    // Closing a session collects no money. Allow it only while nothing has
+    // been ordered — a walk-out, or a table opened by mistake. The moment a
+    // KOT exists the food is on its way and the bill has to be settled
+    // through billing, which frees the table itself. Cancelled KOTs don't
+    // count: a waiter who added and voided everything is back to an empty
+    // table. Enforced here and not only in the UI, because any client can
+    // call this endpoint.
+    const liveOrders = await this.prisma.kot.count({
+      where: { sessionId: id, status: { not: 'cancelled' } },
+    });
+    if (liveOrders > 0) {
+      throw new BadRequestException(
+        'This table has orders on it. Request the bill and settle the payment to free the table.',
+      );
+    }
+
+    // Freed, not parked in 'cleaning'. Every other way a session ends —
+    // paying the bill, merging into another table — releases the table
+    // straight to 'available', and nothing in the app has ever been able to
+    // move a table out of 'cleaning' again, so a closed table was stranded.
     const [updated] = await this.prisma.$transaction([
       this.prisma.tableSession.update({
         where: { id },
@@ -64,12 +84,12 @@ export class SessionsService {
       }),
       this.prisma.restaurantTable.update({
         where: { id: session.tableId },
-        data: { status: 'cleaning', currentSessionId: null, billRequested: false, billRequestedAt: null },
+        data: { status: 'available', currentSessionId: null, billRequested: false, billRequestedAt: null },
       }),
     ]);
 
     this.realtime.sessionClosed(session.branchId, updated);
-    this.realtime.tableStatusChanged(session.branchId, session.tableId, { status: 'cleaning' });
+    this.realtime.tableStatusChanged(session.branchId, session.tableId, { status: 'available' });
     this.auditLogs.record({
       branchId: session.branchId,
       userId: currentUser?.userId,

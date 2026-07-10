@@ -16,6 +16,7 @@ import '../../../menu/domain/entities/menu_entities.dart';
 import '../../../orders/presentation/providers/order_provider.dart';
 import '../widgets/recipe_dialog.dart';
 import 'package:file_picker/file_picker.dart';
+import '../../../../core/widgets/notification_bell.dart';
 
 // All categories for the branch
 final menuCategoriesStreamProvider =
@@ -321,6 +322,7 @@ class _MenuManagementScreenState extends ConsumerState<MenuManagementScreen> {
               ),
             const SizedBox(width: 16),
           ],
+          const NotificationBell(),
         ],
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(1),

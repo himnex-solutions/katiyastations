@@ -44,8 +44,19 @@ export class RealtimeService {
     this.gateway.emitToRoom(SocketRooms.branch(branchId), SocketEvents.inventoryLowStock, payload);
   }
 
-  notification(branchId: string, payload: unknown) {
-    this.gateway.emitToRoom(SocketRooms.branch(branchId), SocketEvents.notificationNew, payload);
+  /**
+   * Wakes only the bells that should ring. `audience` is the list of roles the
+   * alert was written for; an empty list means the whole branch, which is the
+   * old behaviour and stays available for genuinely branch-wide news.
+   */
+  notification(branchId: string, payload: unknown, audience: string[] = []) {
+    if (audience.length === 0) {
+      this.gateway.emitToRoom(SocketRooms.branch(branchId), SocketEvents.notificationNew, payload);
+      return;
+    }
+    for (const role of audience) {
+      this.gateway.emitToRoom(SocketRooms.role(branchId, role), SocketEvents.notificationNew, payload);
+    }
   }
 
   shiftClosed(branchId: string, payload: unknown) {

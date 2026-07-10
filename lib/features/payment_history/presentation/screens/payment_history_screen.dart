@@ -9,6 +9,7 @@ import '../../../../core/constants/api_constants.dart';
 import '../../../../core/network/api_client.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
 import 'package:katiya_station_rms/features/cashier/domain/entities/bill_entities.dart';
+import '../../../../core/widgets/notification_bell.dart';
 
 final billsStreamProvider =
     FutureProvider.family<List<Bill>, DateTimeRange?>((ref, range) async {
@@ -78,6 +79,7 @@ class _PaymentHistoryScreenState extends ConsumerState<PaymentHistoryScreen> {
           ),
           if (_range != null)
             IconButton(icon: const Icon(Icons.close, size: 18), onPressed: () => setState(() => _range = null)),
+          const NotificationBell(),
         ],
       ),
       body: Column(
