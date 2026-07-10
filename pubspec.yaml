@@ -75,7 +75,11 @@ dependencies:
   file_saver: ^0.3.1
 
   # Looping alarm on the kitchen screen when a KOT goes unaccepted.
-  audioplayers: ^6.8.1
+  # Pinned, not caret: CI and Vercel build on Flutter 3.32.0 (see vercel.json
+  # and .github/workflows/flutter-web.yml), and audioplayers 6.7.0+ requires
+  # Flutter >=3.35.0. 6.6.0 is the newest release that still builds there.
+  # Raise this only together with the pinned Flutter version.
+  audioplayers: 6.6.0
 
 dev_dependencies:
   flutter_test:
