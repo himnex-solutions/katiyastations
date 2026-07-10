@@ -2,7 +2,8 @@ name: Deploy Backend
 
 on:
   push:
-    branches: [main]
+    branches:
+      - main
     paths:
       - 'backend/**'
       - '.github/workflows/deploy.yml'
@@ -10,16 +11,20 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+
     defaults:
       run:
         working-directory: backend
+
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: npm
           cache-dependency-path: backend/package-lock.json
+
       - run: npm ci
       - run: npx prisma generate
       - run: npm run build
@@ -27,18 +32,33 @@ jobs:
   deploy:
     needs: build
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main'
+
     steps:
-      - name: SSH into VPS and redeploy
-        uses: appleboy/ssh-action@v1.0.3
+      - name: Deploy to VPS
+        uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.VPS_HOST }}
-          username: ${{ secrets.VPS_USER }}
-          key: ${{ secrets.VPS_SSH_KEY }}
+          username: katiyarms
+          password: ${{ secrets.VPS_PASSWORD }}
+          port: 22
           script: |
-            cd ${{ secrets.VPS_REPO_PATH }}
+            cd ~/katiyastation/katiyastations/backend
+
+            echo "Pulling latest code..."
             git pull origin main
-            cd backend
-            docker compose run --rm nestjs_api npx prisma migrate deploy
-            docker compose up -d --build nestjs_api
-            docker image prune -f
+
+            echo "Installing packages..."
+            npm install
+
+            echo "Generating Prisma..."
+            npx prisma generate
+
+            echo "Running migrations..."
+            npx prisma migrate deploy
+
+            echo "Restarting backend..."
+            pm2 restart katiya-api
+
+            pm2 save
+
+            echo "Deployment completed!"
