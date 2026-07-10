@@ -1,5 +1,19 @@
 # Project-level configuration.
 cmake_minimum_required(VERSION 3.14)
+
+# The Firebase C++ SDK for Windows (pulled in by firebase_core /
+# firebase_messaging) ships a bundled CMakeLists that still declares an ancient
+# `cmake_minimum_required`. CMake 4.0+ first hard-errors on compatibility below
+# 3.5, and then still *warns* that compatibility below 3.10 will be removed in a
+# future release. Pinning the minimum policy version to 3.10 clears both: the
+# third-party subprojects configure with no error and no deprecation warning.
+#
+# A plain (non-cache) variable on purpose — it is re-read on every configure and
+# inherited by every add_subdirectory below, so bumping it here always takes
+# effect without a `flutter clean`. It's a no-op for our own targets, which
+# already require 3.14. Must be set before the plugins are included further down.
+set(CMAKE_POLICY_VERSION_MINIMUM 3.10)
+
 project(katiya_station_rms LANGUAGES CXX)
 
 # The name of the executable created for the application. Change this to change
@@ -31,6 +45,13 @@ set(CMAKE_CXX_FLAGS_PROFILE "${CMAKE_CXX_FLAGS_RELEASE}")
 
 # Use Unicode for all projects.
 add_definitions(-DUNICODE -D_UNICODE)
+
+# The audioplayers_windows plugin still includes <experimental/coroutine>. On
+# recent Visual Studio toolsets the MSVC STL turns that into a hard error
+# (STL1011) rather than a warning. This define keeps that third-party plugin
+# compiling until it moves to the C++20 <coroutine> header. Set at the top
+# level so it reaches the plugin subprojects added further down.
+add_compile_definitions(_SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS)
 
 # Compilation settings that should be applied to most targets.
 #
