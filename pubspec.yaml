@@ -74,6 +74,9 @@ dependencies:
   printing: ^5.14.3
   file_saver: ^0.3.1
 
+  # Looping alarm on the kitchen screen when a KOT goes unaccepted.
+  audioplayers: ^6.8.1
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
@@ -89,3 +92,4 @@ flutter:
     - assets/images/
     - assets/icons/
     - assets/lottie/
+    - assets/sounds/

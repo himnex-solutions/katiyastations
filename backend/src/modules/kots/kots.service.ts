@@ -124,6 +124,17 @@ export class KotsService {
   async updateStatus(id: string, dto: UpdateStatusDto, currentUser?: CurrentUserPayload) {
     const kot = await this.findOne(id);
     const becomingReady = dto.status === 'ready' && !kot.readyAt;
+
+    // Snapshot before the bulk update below rewrites every item's status.
+    // Rejecting a ticket the kitchen never started must put its ingredients
+    // back, the same "restock if cancelled before preparation" rule
+    // updateItemStatus applies to a single item — otherwise the stock was
+    // deducted at create() and silently never returned.
+    const itemsToRestock =
+      dto.status === 'cancelled' && kot.status === 'pending'
+        ? kot.items.filter((i) => i.status === 'pending')
+        : [];
+
     const updated = await this.prisma.kot.update({
       where: { id },
       data: {
@@ -142,7 +153,18 @@ export class KotsService {
     }
 
     if (dto.status === 'cancelled') {
+      for (const item of itemsToRestock) {
+        await this.restoreStockForItem(kot.branchId, item);
+      }
       await this.recalculateSessionTotal(kot.sessionId);
+      this.auditLogs.record({
+        branchId: kot.branchId,
+        userId: currentUser?.userId,
+        action: 'item_cancelled',
+        tableName: 'kots',
+        rowId: id,
+        oldValues: { kotNumber: kot.kotNumber, previousStatus: kot.status },
+      });
     }
 
     const response = await this.findOneResponse(id);

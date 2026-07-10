@@ -7,8 +7,10 @@ import 'package:skeletonizer/skeletonizer.dart';
 import 'package:intl/intl.dart';
 import '../../../../core/constants/app_colors.dart';
 import '../../../../core/utils/responsive_utils.dart';
+import '../../../../core/widgets/confirm_dialog.dart';
 import '../../../../core/widgets/thermal_receipt.dart';
 import '../providers/kitchen_provider.dart';
+import '../widgets/overdue_kot_alarm.dart';
 import '../../../orders/domain/entities/order_entities.dart';
 import '../../../orders/presentation/providers/order_provider.dart';
 import '../../../branches/presentation/providers/branch_provider.dart';
@@ -73,7 +75,14 @@ class KitchenScreen extends ConsumerWidget {
           const NotificationBell(),
         ],
       ),
-      body: kotsAsync.when(
+      // The alarm sits outside `kotsAsync.when` on purpose: it has to stay
+      // mounted across a refresh, or a socket-triggered reload would silence
+      // it for a frame and restart the clip from the top.
+      body: Column(
+        children: [
+          const OverdueKotAlarm(),
+          Expanded(
+            child: kotsAsync.when(
         loading: () => const Center(child: CircularProgressIndicator(color: AppColors.primary)),
         error: (e, _) => Center(child: Text('Error: $e', style: const TextStyle(color: AppColors.error))),
         data: (kots) {
@@ -159,6 +168,9 @@ class KitchenScreen extends ConsumerWidget {
             ],
           );
         },
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -549,30 +561,74 @@ class _KotCard extends ConsumerWidget {
                     style: GoogleFonts.outfit(fontSize: 11, color: AppColors.warning)),
               ),
             ),
-          // Action button
+          // Action buttons. A pending ticket also gets Reject — accepting is
+          // otherwise the only way out of the queue, and the overdue alarm
+          // rings until a ticket leaves it.
           Padding(
             padding: const EdgeInsets.fromLTRB(10, 4, 10, 10),
-            child: SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: color,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 10),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            child: Row(
+              children: [
+                if (kot.isPending) ...[
+                  Expanded(
+                    child: OutlinedButton(
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: AppColors.error,
+                        side: const BorderSide(color: AppColors.error),
+                        padding: const EdgeInsets.symmetric(vertical: 10),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8)),
+                      ),
+                      onPressed: () => _confirmReject(context, ref),
+                      child: Text('Reject',
+                          style: GoogleFonts.outfit(
+                              fontSize: 13, fontWeight: FontWeight.w600)),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                ],
+                Expanded(
+                  child: ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: color,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 10),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                    ),
+                    onPressed: () {
+                      ref.read(kitchenNotifierProvider.notifier)
+                          .updateKotStatus(kot.id, nextStatus);
+                      ref.invalidate(sessionKotsProvider(kot.sessionId));
+                    },
+                    child: Text(nextLabel, style: GoogleFonts.outfit(fontSize: 13, fontWeight: FontWeight.w600)),
+                  ),
                 ),
-                onPressed: () {
-                  ref.read(kitchenNotifierProvider.notifier)
-                      .updateKotStatus(kot.id, nextStatus);
-                  ref.invalidate(sessionKotsProvider(kot.sessionId));
-                },
-                child: Text(nextLabel, style: GoogleFonts.outfit(fontSize: 13, fontWeight: FontWeight.w600)),
-              ),
+              ],
             ),
           ),
         ],
       ),
     );
+  }
+
+  /// Rejecting cancels the whole ticket. The waiter sees it disappear from the
+  /// table's order list and has to re-send it, so it's worth a confirmation —
+  /// a mis-tap here throws away a real order.
+  Future<void> _confirmReject(BuildContext context, WidgetRef ref) async {
+    final confirmed = await showConfirmDialog(
+      context,
+      title: 'Reject Order?',
+      message: 'Reject ${kot.kotNumber}'
+          '${kot.tableNumber != null ? ' for Table ${kot.tableNumber}' : ''}?\n\n'
+          'The waiter will have to send it again. This cannot be undone.',
+      confirmLabel: 'Reject Order',
+      icon: Icons.cancel_rounded,
+    );
+    if (!confirmed) return;
+
+    await ref
+        .read(kitchenNotifierProvider.notifier)
+        .updateKotStatus(kot.id, 'cancelled');
+    ref.invalidate(sessionKotsProvider(kot.sessionId));
   }
 
   // ─────────────────────────────────────────────────────────
