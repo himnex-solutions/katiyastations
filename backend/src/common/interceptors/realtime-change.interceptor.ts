@@ -51,8 +51,10 @@ const ACTION_VERBS: Record<string, string> = {
 };
 
 interface NotifyRule {
-  /** Human label used in the notification title. */
-  label: string;
+  /** Bell headline, written as the event — e.g. "New reservation". */
+  title: string;
+  /** Second line. `by` is " by <email>" or empty. */
+  body: (by: string) => string;
   /** Roles whose bell should ring. The user who made the change is excluded. */
   audience: Role[];
   /** Restrict to specific HTTP methods. Omit to notify on all four. */
@@ -60,48 +62,40 @@ interface NotifyRule {
 }
 
 /**
- * The whole notification policy, in one table.
+ * The whole notification policy, in one deliberately tiny table.
  *
- * An entity that isn't listed here never writes a bell notification — it still
- * broadcasts `data:changed`, so screens showing it stay live. That is the
- * point: `kots`, `tables`, `sessions` and `billing` change many times a
- * minute and already have dedicated live screens (kitchen board, table grid,
- * cashier till). Ringing every bell for each of those ticks is the noise this
- * table exists to kill.
+ * A bell rings only when a *specific person is waiting to act on this exact
+ * event* — never for routine record-keeping. Editing the menu, adding a
+ * customer, recording an expense, restocking a shelf: all still broadcast
+ * `data:changed` so the relevant screen refreshes live, but none of them
+ * writes a Notification row. That day-to-day churn was what filled the table
+ * and made the badge meaningless, so it is intentionally absent here.
  *
- * The rule for adding an entry: would a person in `audience` have to *do*
- * something because of this write? If not, leave it out.
+ * The one operational alarm that matters most — low / out of stock — is not in
+ * this table at all: InventoryService raises it through
+ * NotificationsService.lowStock() with its own wording and dedup.
+ *
+ * The bar for adding an entry: a named role is blocked or waiting until they
+ * respond to *this* write. "Nice to know" is not enough — leave it out.
  */
 const NOTIFY_RULES: Record<string, NotifyRule> = {
-  // Stock someone has to go count, reorder, or restock.
-  inventory: { label: 'Inventory', audience: ['inventory', 'branch_manager'] },
-  bar: { label: 'Bar stock', audience: ['inventory', 'branch_manager'] },
-  suppliers: { label: 'Supplier', audience: ['inventory', 'branch_manager'] },
-  purchases: {
-    label: 'Purchase',
-    audience: ['inventory', 'branch_manager', 'accountant'],
-    methods: ['POST', 'DELETE'],
+  // A new booking: the floor has to hold and prepare a table at a set time.
+  // Only a fresh reservation — edits and cancellations aren't someone waiting.
+  reservations: {
+    title: 'New reservation',
+    body: (by) => `A table has been reserved${by}. Check the Reservations tab.`,
+    audience: ['cashier', 'waiter', 'branch_manager'],
+    methods: ['POST'],
   },
 
-  // Money someone has to reconcile.
-  expenses: { label: 'Expense', audience: ['accountant', 'branch_manager'] },
-  credit: { label: 'Credit', audience: ['cashier', 'accountant', 'branch_manager'] },
-  'shift-closing': { label: 'Shift', audience: ['branch_manager', 'cashier'] },
-
-  // Front-of-house work handed to the floor.
-  reservations: { label: 'Reservation', audience: ['cashier', 'waiter', 'branch_manager'] },
-  customers: { label: 'Customer', audience: ['cashier', 'branch_manager'], methods: ['POST', 'DELETE'] },
-  loyalty: { label: 'Loyalty', audience: ['cashier', 'branch_manager'] },
-
-  // A changed menu invalidates what the floor and the kitchen can sell/cook.
-  menu: { label: 'Menu', audience: ['cashier', 'waiter', 'kitchen', 'branch_manager'] },
-
-  // People and pay — the manager's problem, nobody else's.
-  staff: { label: 'Staff', audience: ['branch_manager'] },
-  users: { label: 'User account', audience: ['branch_manager'] },
-  attendance: { label: 'Attendance', audience: ['branch_manager'] },
-  payroll: { label: 'Payroll', audience: ['branch_manager', 'accountant'] },
-  branches: { label: 'Branch', audience: ['branch_manager'] },
+  // A submitted shift closing blocks the cashier from leaving until the
+  // manager reviews and approves it.
+  'shift-closing': {
+    title: 'Shift closing to review',
+    body: (by) => `A shift closing was submitted${by} and is waiting for your approval.`,
+    audience: ['branch_manager'],
+    methods: ['POST'],
+  },
 };
 
 @Injectable()
@@ -142,7 +136,7 @@ export class RealtimeChangeInterceptor implements NestInterceptor {
 
         const rule = NOTIFY_RULES[entity];
         if (rule && (rule.methods ?? Object.keys(ACTION_VERBS)).includes(method)) {
-          void this.recordNotification(branchId, rule, method, actor);
+          void this.recordNotification(branchId, rule, actor);
         }
       }),
     );
@@ -155,11 +149,9 @@ export class RealtimeChangeInterceptor implements NestInterceptor {
   private async recordNotification(
     branchId: string,
     rule: NotifyRule,
-    method: string,
     actor: CurrentUserPayload | undefined,
   ): Promise<void> {
     try {
-      const verb = ACTION_VERBS[method];
       const by = actor?.email ? ` by ${actor.email}` : '';
 
       // Someone whose only role is the audience *and* who made the change
@@ -171,8 +163,8 @@ export class RealtimeChangeInterceptor implements NestInterceptor {
       const notification = await this.prisma.notification.create({
         data: {
           branchId,
-          title: `${rule.label} ${verb}`,
-          body: `${rule.label} was ${verb}${by}.`,
+          title: rule.title,
+          body: rule.body(by),
           audience,
           actorId: actor?.userId ?? null,
         },
