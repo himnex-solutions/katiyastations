@@ -29,6 +29,19 @@ abstract class ThermalPrinter {
     required Map<String, dynamic> kot,
   });
 
+  /// Prints a customer bill or the final tax invoice on the till's printer.
+  ///
+  /// [bill] accepts the backend's snake_case record (`invoice_number`,
+  /// `total_amount`, …) or a camelCase draft assembled client-side before an
+  /// invoice exists; [items] are the line items (`menu_item_name`, `quantity`,
+  /// `unit_price`). Whatever is absent is simply left off the slip.
+  Future<void> printBill({
+    required PrinterConfig config,
+    Map<String, dynamic>? branch,
+    required Map<String, dynamic> bill,
+    required List<Map<String, dynamic>> items,
+  });
+
   /// Sends a short "printer connected" test slip.
   Future<void> testPrint({required PrinterConfig config, Map<String, dynamic>? branch});
 

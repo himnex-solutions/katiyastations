@@ -6,6 +6,7 @@ import '../../../../core/constants/app_colors.dart';
 import '../../../../core/constants/app_constants.dart';
 import '../../../../core/constants/api_constants.dart';
 import '../../../../core/network/api_client.dart';
+import '../../../../core/printing/print_actions.dart';
 import '../../../../core/printing/printer_status_pill.dart';
 import '../../../../core/utils/responsive_utils.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
@@ -278,8 +279,8 @@ class _CashierScreenState extends ConsumerState<CashierScreen>
               ),
               borderRadius: BorderRadius.circular(10),
             ),
-            child: const Icon(Icons.point_of_sale,
-                color: Colors.white, size: 18),
+            child:
+                const Icon(Icons.point_of_sale, color: Colors.white, size: 18),
           ),
           const SizedBox(width: 10),
           Column(
@@ -2539,7 +2540,22 @@ class _CashierScreenState extends ConsumerState<CashierScreen>
     showThermalPrintDialog(
       context,
       title: 'Thermal Print Preview',
-      onPrint: () => showPrintSentSnackbar(context),
+      // No invoice number yet — printBill renders this as a draft slip the
+      // guest checks before paying, not as a tax invoice.
+      onPrint: () => printBillNow(
+        context,
+        ref,
+        bill: {
+          'table_number': tableNumber,
+          'session_number': sessionNumber,
+          'sub_total': subtotal,
+          'service_charge': serviceCharge,
+          'discount': _discount,
+          'total_amount': total,
+          'customer_name': _customerName,
+        },
+        items: items.cast<Map<String, dynamic>>(),
+      ),
       receipt: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -2606,8 +2622,14 @@ class _CashierScreenState extends ConsumerState<CashierScreen>
     showThermalPrintDialog(
       context,
       title: 'Receipt',
-      onPrint: () => showPrintSentSnackbar(context,
-          label: 'Receipt sent to thermal printer!'),
+      // The settled bill: it carries an invoice number, so printBill renders
+      // it as a tax invoice with payment method, amount paid and change.
+      onPrint: () => printBillNow(
+        context,
+        ref,
+        bill: bill,
+        items: items.cast<Map<String, dynamic>>(),
+      ),
       receipt: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [

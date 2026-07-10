@@ -7,6 +7,7 @@ import 'package:skeletonizer/skeletonizer.dart';
 import 'package:intl/intl.dart';
 import '../../../../core/constants/app_colors.dart';
 import '../../../../core/utils/responsive_utils.dart';
+import '../../../../core/printing/print_actions.dart';
 import '../../../../core/widgets/confirm_dialog.dart';
 import '../../../../core/widgets/thermal_receipt.dart';
 import '../providers/kitchen_provider.dart';
@@ -641,7 +642,26 @@ class _KotCard extends ConsumerWidget {
     showThermalPrintDialog(
       context,
       title: 'KOT Print Preview',
-      onPrint: () => showPrintSentSnackbar(context, label: 'KOT sent to kitchen printer!'),
+      // Reprint of a ticket already on the board — same ESC/POS builder the
+      // auto-print path uses, so the paper looks identical either way.
+      onPrint: () => printKotNow(
+        context,
+        ref,
+        kot: {
+          'kotNumber': kot.kotNumber,
+          'tableNumber': kot.tableNumber,
+          'waiterName': kot.waiterName,
+          'createdAt': kot.createdAt.toIso8601String(),
+          'items': items
+              .map((i) => {
+                    'name': i.menuItemName,
+                    'quantity': i.quantity,
+                    'note': i.notes,
+                    'status': i.status,
+                  })
+              .toList(),
+        },
+      ),
       receipt: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [

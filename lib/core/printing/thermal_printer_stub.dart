@@ -26,6 +26,16 @@ class _StubThermalPrinter implements ThermalPrinter {
   }
 
   @override
+  Future<void> printBill({
+    required PrinterConfig config,
+    Map<String, dynamic>? branch,
+    required Map<String, dynamic> bill,
+    required List<Map<String, dynamic>> items,
+  }) async {
+    throw UnsupportedError('Thermal printing is not available on this platform');
+  }
+
+  @override
   Future<void> testPrint({required PrinterConfig config, Map<String, dynamic>? branch}) async {
     throw UnsupportedError('Thermal printing is not available on this platform');
   }

@@ -91,12 +91,13 @@ const List<NavItem> allNavItems = [
       allowedRoles: ['cashier', 'waiter', 'kitchen', 'inventory']),
   NavItem(label: 'Reports', icon: Icons.bar_chart, activeIcon: Icons.bar_chart, path: '/reports',
       allowedRoles: ['branch_manager', 'accountant', 'cashier']),
-  // Cashiers included: Settings holds nothing privileged — Branch Details and
-  // System Info are read-only, and the thermal-printer card writes only to
-  // this device's local storage. A cashier must be able to pair the printer
-  // on their own till without a manager signing in.
+  // Cashiers and kitchen staff included: Settings holds nothing privileged —
+  // Branch Details and System Info are read-only, and the thermal-printer card
+  // writes only to this device's local storage. A cashier must be able to pair
+  // the bill printer on their own till, and the kitchen station must be able to
+  // pair its KOT printer and arm auto-print, without a manager signing in.
   NavItem(label: 'Settings', icon: Icons.settings, activeIcon: Icons.settings_outlined, path: '/settings',
-      allowedRoles: ['super_admin', 'branch_manager', 'cashier']),
+      allowedRoles: ['super_admin', 'branch_manager', 'cashier', 'kitchen']),
   NavItem(label: 'Loyalty', icon: Icons.star, activeIcon: Icons.star, path: '/loyalty',
       allowedRoles: ['branch_manager', 'cashier']),
   NavItem(label: 'Suppliers', icon: Icons.local_shipping, activeIcon: Icons.local_shipping, path: '/suppliers',

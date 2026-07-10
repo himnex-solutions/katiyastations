@@ -18,6 +18,9 @@ import 'thermal_printer.dart';
 
 ThermalPrinter createThermalPrinter() => _IoThermalPrinter();
 
+/// Amounts on a receipt always carry both decimals, thousands separated.
+final NumberFormat _money2 = NumberFormat('#,##0.00');
+
 class _IoThermalPrinter implements ThermalPrinter {
   final _manager = PrinterManager.instance;
   CapabilityProfile? _profileCache;
@@ -70,6 +73,16 @@ class _IoThermalPrinter implements ThermalPrinter {
     required Map<String, dynamic> kot,
   }) async {
     await _send(config, await _buildKotBytes(config, branch, kot));
+  }
+
+  @override
+  Future<void> printBill({
+    required PrinterConfig config,
+    Map<String, dynamic>? branch,
+    required Map<String, dynamic> bill,
+    required List<Map<String, dynamic>> items,
+  }) async {
+    await _send(config, await _buildBillBytes(config, branch, bill, items));
   }
 
   @override
@@ -247,6 +260,13 @@ class _IoThermalPrinter implements ThermalPrinter {
   /// Reads a field by camelCase (socket payload) or snake_case (REST record).
   String _f(Map m, String camel, String snake) => (m[camel] ?? m[snake] ?? '').toString().trim();
 
+  /// Same, for money and quantities. Prisma sends Decimal as a string.
+  double _n(Map m, String camel, String snake) {
+    final raw = m[camel] ?? m[snake];
+    if (raw is num) return raw.toDouble();
+    return double.tryParse(raw?.toString() ?? '') ?? 0;
+  }
+
   String _branchName(Map<String, dynamic>? branch) {
     final n = (branch?['name'] as String?)?.trim();
     return (n != null && n.isNotEmpty ? n : 'KATIYA STATION').toUpperCase();
@@ -292,6 +312,113 @@ class _IoThermalPrinter implements ThermalPrinter {
 
     b += g.hr();
     b += g.text('Total items: $totalQty', styles: const PosStyles(bold: true, align: PosAlign.right));
+    b += g.feed(2);
+    b += g.cut();
+    return b;
+  }
+
+  /// Two-column money line: label left, amount right-aligned to the paper edge.
+  List<int> _money(Generator g, String label, double value, {bool bold = false}) =>
+      g.row([
+        PosColumn(text: label, width: 7, styles: PosStyles(bold: bold)),
+        PosColumn(
+          text: _money2.format(value),
+          width: 5,
+          styles: PosStyles(align: PosAlign.right, bold: bold),
+        ),
+      ]);
+
+  Future<List<int>> _buildBillBytes(
+    PrinterConfig cfg,
+    Map<String, dynamic>? branch,
+    Map<String, dynamic> bill,
+    List<Map<String, dynamic>> items,
+  ) async {
+    final g = Generator(_paper(cfg), await _profile());
+    var b = <int>[];
+
+    final invoiceNo = _f(bill, 'invoiceNumber', 'invoice_number');
+    final billNo = _f(bill, 'billNumber', 'bill_number');
+    final table = _f(bill, 'tableNumber', 'table_number');
+    final session = _f(bill, 'sessionNumber', 'session_number');
+    final cashier = _f(bill, 'cashierName', 'cashier_name');
+    final customer = _f(bill, 'customerName', 'customer_name');
+    final method = _f(bill, 'paymentMethod', 'payment_method').toUpperCase();
+
+    final createdRaw = bill['createdAt'] ?? bill['created_at'];
+    final when = DateTime.tryParse(createdRaw?.toString() ?? '')?.toLocal() ?? DateTime.now();
+
+    final subtotal = _n(bill, 'subTotal', 'sub_total');
+    final discount = _n(bill, 'discount', 'discount');
+    final service = _n(bill, 'serviceCharge', 'service_charge');
+    final vat = _n(bill, 'vatAmount', 'vat_amount');
+    final total = _n(bill, 'totalAmount', 'total_amount');
+    final paid = _n(bill, 'amountPaid', 'amount_paid');
+    final change = _n(bill, 'changeAmount', 'change_amount');
+
+    // An invoice number only exists once the bill has been settled. Before
+    // that this is a draft the guest is handed to check, and saying so keeps
+    // it from being mistaken for a tax receipt.
+    final isInvoice = invoiceNo.isNotEmpty;
+
+    b += g.text(_branchName(branch),
+        styles: const PosStyles(align: PosAlign.center, bold: true, height: PosTextSize.size2, width: PosTextSize.size2));
+    if (branch?['address'] != null) {
+      b += g.text(branch!['address'].toString(), styles: const PosStyles(align: PosAlign.center));
+    }
+    if (branch?['phone'] != null) {
+      b += g.text('Tel: ${branch!['phone']}', styles: const PosStyles(align: PosAlign.center));
+    }
+    b += g.text(isInvoice ? 'TAX INVOICE' : 'BILL (not a tax invoice)',
+        styles: const PosStyles(align: PosAlign.center, bold: true));
+    b += g.hr(ch: '=');
+
+    if (isInvoice) b += g.text('Invoice No: $invoiceNo', styles: const PosStyles(bold: true));
+    if (billNo.isNotEmpty) b += g.text('Bill No   : $billNo');
+    if (table.isNotEmpty) b += g.text('Table     : $table');
+    if (session.isNotEmpty) b += g.text('Session   : $session');
+    b += g.text('Date      : ${DateFormat('dd MMM yyyy, hh:mm a').format(when)}');
+    if (cashier.isNotEmpty) b += g.text('Cashier   : $cashier');
+    if (customer.isNotEmpty) b += g.text('Customer  : $customer');
+    b += g.hr();
+
+    for (final item in items) {
+      final name = _f(item, 'menuItemName', 'menu_item_name');
+      final label = name.isNotEmpty ? name : _f(item, 'name', 'name');
+      if (label.isEmpty) continue;
+      final qty = _n(item, 'quantity', 'quantity').toInt();
+      final unit = _n(item, 'unitPrice', 'unit_price');
+      b += g.row([
+        PosColumn(text: '$label x$qty', width: 8),
+        PosColumn(text: _money2.format(unit * qty), width: 4, styles: const PosStyles(align: PosAlign.right)),
+      ]);
+    }
+
+    b += g.hr();
+    b += _money(g, 'Subtotal', subtotal);
+    if (discount > 0) b += _money(g, 'Discount', -discount);
+    if (service > 0) b += _money(g, 'Service Charge', service);
+    if (vat > 0) b += _money(g, 'VAT', vat);
+    b += g.hr();
+    b += g.row([
+      PosColumn(text: 'TOTAL', width: 6, styles: const PosStyles(bold: true, height: PosTextSize.size2)),
+      PosColumn(
+        text: 'NPR ${_money2.format(total)}',
+        width: 6,
+        styles: const PosStyles(align: PosAlign.right, bold: true, height: PosTextSize.size2),
+      ),
+    ]);
+
+    if (isInvoice) {
+      b += g.hr();
+      if (method.isNotEmpty) b += g.text('Paid by   : $method');
+      if (paid > 0) b += _money(g, 'Amount Paid', paid);
+      if (change > 0) b += _money(g, 'Change', change);
+    }
+
+    b += g.feed(1);
+    b += g.text(isInvoice ? 'Thank you! Please visit again.' : 'Please check before paying.',
+        styles: const PosStyles(align: PosAlign.center));
     b += g.feed(2);
     b += g.cut();
     return b;
