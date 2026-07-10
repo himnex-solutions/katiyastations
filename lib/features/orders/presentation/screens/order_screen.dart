@@ -882,12 +882,18 @@ class _OrderScreenState extends ConsumerState<OrderScreen>
     }
 
     messenger.showSnackBar(
-      const SnackBar(
+      SnackBar(
         content: Row(
           children: [
-            Icon(Icons.check_circle, color: AppColors.warning),
-            SizedBox(width: 10),
-            Text('Bill request sent to cashier!'),
+            const Icon(Icons.check_circle, color: AppColors.warning),
+            const SizedBox(width: 10),
+            // Explicit dark text: the background is a light grey, and the
+            // SnackBar theme's default content colour is white — which was
+            // leaving this message invisible.
+            Text('Bill request sent to cashier!',
+                style: GoogleFonts.outfit(
+                    color: AppColors.textPrimary,
+                    fontWeight: FontWeight.w600)),
           ],
         ),
         backgroundColor: AppColors.surfaceVariant,

@@ -10,6 +10,32 @@ import '../../router/app_router.dart';
 import '../network/realtime_sync.dart';
 import '../printing/kot_auto_print.dart';
 
+/// Human label for a role — shared by the desktop rail footer and the mobile
+/// account sheet so both name the role the same way.
+String roleLabelFor(String? role) {
+  switch (role) {
+    case 'super_admin': return 'Super Admin';
+    case 'branch_manager': return 'Manager';
+    case 'cashier': return 'Cashier';
+    case 'waiter': return 'Waiter';
+    case 'kitchen': return 'Kitchen';
+    case 'inventory': return 'Inventory';
+    case 'accountant': return 'Accountant';
+    default: return 'Staff';
+  }
+}
+
+Color roleColorFor(String? role) {
+  switch (role) {
+    case 'branch_manager': return AppColors.roleManager;
+    case 'cashier': return AppColors.roleCashier;
+    case 'waiter': return AppColors.roleWaiter;
+    case 'kitchen': return AppColors.roleKitchen;
+    case 'inventory': return AppColors.roleInventory;
+    default: return AppColors.textSecondary;
+  }
+}
+
 class AppShell extends ConsumerWidget {
   final Widget child;
   final String currentPath;
@@ -96,7 +122,7 @@ class AppShell extends ConsumerWidget {
         indicatorColor: AppColors.primary.withValues(alpha: 0.12),
         onDestinationSelected: (i) {
           if (showMore && i == moreIndex) {
-            _showMoreSheet(context, overflowItems, ref);
+            _showMoreSheet(context, overflowItems, ref, profile);
           } else {
             context.go(visibleItems[i].path);
           }
@@ -121,7 +147,11 @@ class AppShell extends ConsumerWidget {
   }
 
   void _showMoreSheet(
-      BuildContext context, List<NavItem> items, WidgetRef ref) {
+      BuildContext context, List<NavItem> items, WidgetRef ref, dynamic profile) {
+    final role = profile?.role as String?;
+    final fullName = (profile?.fullName as String?)?.trim();
+    final roleColor = roleColorFor(role);
+
     showModalBottomSheet(
       context: context,
       backgroundColor: AppColors.surface,
@@ -145,13 +175,45 @@ class AppShell extends ConsumerWidget {
                 ),
               ),
               const SizedBox(height: 16),
-              // Roles with no overflow open this sheet purely for Sign Out.
-              Text(items.isEmpty ? 'Account' : 'More',
-                  style: GoogleFonts.outfit(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w700,
-                      color: AppColors.textPrimary)),
-              const SizedBox(height: 12),
+              // Who's signed in — the mobile/tablet nav has no side rail to
+              // carry this, so the name and role live here alongside Sign Out.
+              Row(
+                children: [
+                  CircleAvatar(
+                    radius: 22,
+                    backgroundColor: roleColor.withValues(alpha: 0.2),
+                    child: Text(
+                      (fullName?.isNotEmpty ?? false)
+                          ? fullName!.substring(0, 1).toUpperCase()
+                          : 'U',
+                      style: TextStyle(
+                          color: roleColor,
+                          fontWeight: FontWeight.w700,
+                          fontSize: 16),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          (fullName?.isNotEmpty ?? false) ? fullName! : 'User',
+                          style: GoogleFonts.outfit(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w700,
+                              color: AppColors.textPrimary),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        Text(roleLabelFor(role),
+                            style: GoogleFonts.outfit(
+                                fontSize: 12, color: roleColor)),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
               if (items.isNotEmpty)
               Flexible(
                 child: GridView.builder(
@@ -285,29 +347,8 @@ class _SideNavRail extends StatefulWidget {
 class _SideNavRailState extends State<_SideNavRail> {
   bool _collapsed = false;
 
-  String get _roleLabel {
-    switch (widget.profile?.role) {
-      case 'super_admin': return 'Super Admin';
-      case 'branch_manager': return 'Manager';
-      case 'cashier': return 'Cashier';
-      case 'waiter': return 'Waiter';
-      case 'kitchen': return 'Kitchen';
-      case 'inventory': return 'Inventory';
-      case 'accountant': return 'Accountant';
-      default: return 'Staff';
-    }
-  }
-
-  Color get _roleColor {
-    switch (widget.profile?.role) {
-      case 'branch_manager': return AppColors.roleManager;
-      case 'cashier': return AppColors.roleCashier;
-      case 'waiter': return AppColors.roleWaiter;
-      case 'kitchen': return AppColors.roleKitchen;
-      case 'inventory': return AppColors.roleInventory;
-      default: return AppColors.textSecondary;
-    }
-  }
+  String get _roleLabel => roleLabelFor(widget.profile?.role);
+  Color get _roleColor => roleColorFor(widget.profile?.role);
 
   @override
   Widget build(BuildContext context) {

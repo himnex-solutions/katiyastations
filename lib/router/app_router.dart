@@ -57,8 +57,12 @@ class NavItem {
 const List<NavItem> allNavItems = [
   NavItem(label: 'Super Admin', icon: Icons.verified_user, activeIcon: Icons.verified_user, path: '/super-admin',
       allowedRoles: ['super_admin']),
+  // Kitchen staff are deliberately excluded: their whole job lives on the
+  // Kitchen Display, so they land there instead (see landingPathForRole) and
+  // the Dashboard — a manager/cashier overview — would only be dead weight in
+  // their nav.
   NavItem(label: 'Dashboard', icon: Icons.dashboard, activeIcon: Icons.dashboard_outlined, path: '/dashboard',
-      allowedRoles: ['branch_manager', 'cashier', 'waiter', 'kitchen', 'inventory', 'accountant']),
+      allowedRoles: ['branch_manager', 'cashier', 'waiter', 'inventory', 'accountant']),
   NavItem(label: 'Tables', icon: Icons.grid_view, activeIcon: Icons.grid_view, path: '/tables',
       allowedRoles: ['branch_manager', 'cashier', 'waiter']),
   NavItem(label: 'Kitchen', icon: Icons.soup_kitchen, activeIcon: Icons.soup_kitchen, path: '/kitchen',
@@ -115,6 +119,20 @@ List<NavItem> getNavItemsForRole(String? role) {
   return allNavItems.where((item) => item.allowedRoles.contains(role)).toList();
 }
 
+/// Where a role starts after login. Most land on the Dashboard; the two roles
+/// whose home isn't the Dashboard get sent to their own screen instead —
+/// otherwise they'd open on a page that isn't even in their nav.
+String landingPathForRole(String? role) {
+  switch (role) {
+    case 'super_admin':
+      return '/super-admin';
+    case 'kitchen':
+      return '/kitchen';
+    default:
+      return '/dashboard';
+  }
+}
+
 /// Bridges a Riverpod [StateNotifier] stream to go_router's
 /// [Listenable]-based refresh mechanism, so the redirect callback re-runs
 /// on auth changes without the [GoRouter] instance itself being rebuilt
@@ -169,10 +187,14 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       if (isLoggedIn) {
         final role = authState.valueOrNull?.role;
         if (isLoginPage) {
-          return role == 'super_admin' ? '/super-admin' : '/dashboard';
+          return landingPathForRole(role);
         }
-        if (state.matchedLocation == '/dashboard' && role == 'super_admin') {
-          return '/super-admin';
+        // The Dashboard isn't every role's home. Bounce the roles that land
+        // elsewhere (super_admin, kitchen) off it — reached by the login
+        // redirect above, a deep-link, or a hard refresh — to their own screen.
+        final home = landingPathForRole(role);
+        if (state.matchedLocation == '/dashboard' && home != '/dashboard') {
+          return home;
         }
       }
       return null;
