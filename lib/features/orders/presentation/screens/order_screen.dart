@@ -147,21 +147,28 @@ class _OrderScreenState extends ConsumerState<OrderScreen>
                     // last order goes out, without leaving the screen.
                     final orders =
                         ref.watch(sessionOrderStateProvider(widget.sessionId));
+                    final canBill = orders.canRequestBill;
                     return Tooltip(
                       message: orders.billBlockedReason ?? 'Request Bill',
                       child: TextButton.icon(
                         icon: Icon(Icons.receipt_long_rounded,
                             size: 16,
-                            color: orders.canRequestBill
+                            color: canBill
                                 ? AppColors.warning
                                 : AppColors.textHint),
                         label: Text('Request Bill',
                             style: GoogleFonts.outfit(
-                                color: orders.canRequestBill
+                                color: canBill
                                     ? AppColors.warning
                                     : AppColors.textHint)),
-                        onPressed:
-                            orders.canRequestBill ? _handleRequestBill : null,
+                        // Always tappable, so a blocked tap can explain itself.
+                        // Leaving it disabled + a Tooltip only worked on web
+                        // (hover); on phone/tablet the waiter got a dead button
+                        // and no reason. Now the reason pops as a snackbar on
+                        // every platform.
+                        onPressed: canBill
+                            ? _handleRequestBill
+                            : () => _warnBillBlocked(orders.billBlockedReason),
                         style: TextButton.styleFrom(
                             foregroundColor: AppColors.warning),
                       ),
@@ -861,6 +868,31 @@ class _OrderScreenState extends ConsumerState<OrderScreen>
         ));
       }
     }
+  }
+
+  /// Explains why the bill can't be requested yet — shown on tap so the
+  /// message reaches phone/tablet users, where a Tooltip (hover-only) never
+  /// appears. White-on-amber, matching the app's other warning snackbars.
+  void _warnBillBlocked(String? reason) {
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(
+        backgroundColor: AppColors.warning,
+        behavior: SnackBarBehavior.floating,
+        duration: const Duration(seconds: 4),
+        content: Row(children: [
+          const Icon(Icons.info_outline_rounded, color: Colors.white, size: 18),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              reason ??
+                  'The kitchen must serve every order before you can request the bill.',
+              style: GoogleFonts.outfit(
+                  color: Colors.white, fontWeight: FontWeight.w600),
+            ),
+          ),
+        ]),
+      ));
   }
 
   Future<void> _handleRequestBill() async {
