@@ -83,17 +83,22 @@ class _SuperAdminPortalState extends ConsumerState<SuperAdminPortal>
                 color: AppColors.primary, size: 22),
           ),
           const SizedBox(width: 12),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('Super Admin Portal',
-                  style: GoogleFonts.outfit(
-                      fontSize: 16, fontWeight: FontWeight.w700,
-                      color: AppColors.textPrimary)),
-              Text('Katiya Station — Developer Console',
-                  style: GoogleFonts.outfit(
-                      fontSize: 11, color: AppColors.textSecondary)),
-            ],
+          Expanded(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Super Admin Portal',
+                    overflow: TextOverflow.ellipsis,
+                    style: GoogleFonts.outfit(
+                        fontSize: 16, fontWeight: FontWeight.w700,
+                        color: AppColors.textPrimary)),
+                Text('Katiya Station — Developer Console',
+                    overflow: TextOverflow.ellipsis,
+                    style: GoogleFonts.outfit(
+                        fontSize: 11, color: AppColors.textSecondary)),
+              ],
+            ),
           ),
         ]),
         bottom: TabBar(
@@ -260,6 +265,7 @@ class _SuperAdminPortalState extends ConsumerState<SuperAdminPortal>
                 const SizedBox(height: 16),
                 DropdownButtonFormField<String>(
                   value: selectedRole,
+                  isExpanded: true,
                   decoration: const InputDecoration(
                       labelText: 'Role *', prefixIcon: Icon(Icons.badge_outlined)),
                   items: const [
@@ -278,12 +284,14 @@ class _SuperAdminPortalState extends ConsumerState<SuperAdminPortal>
                   error: (_, __) => const SizedBox(),
                   data: (branches) => DropdownButtonFormField<String>(
                     value: selectedBranchId,
+                    isExpanded: true,
                     decoration: const InputDecoration(
                         labelText: 'Assign Branch', prefixIcon: Icon(Icons.store_outlined)),
                     hint: const Text('Select branch'),
                     items: branches.map((b) => DropdownMenuItem<String>(
                           value: b['id'] as String,
-                          child: Text(b['name'] as String),
+                          child: Text(b['name'] as String,
+                              overflow: TextOverflow.ellipsis),
                         )).toList(),
                     onChanged: (v) => setS(() => selectedBranchId = v),
                   ),

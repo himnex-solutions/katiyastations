@@ -16,7 +16,7 @@
         android:icon="@mipmap/ic_launcher"
         android:usesCleartextTraffic="true">
         <!-- The backend URL (ApiConstants.baseUrl) defaults to plain HTTP
-             and is only known at build time via --dart-define, so it can't
+             and is only known at build time via a dart-define, so it can't
              be pinned to a specific domain here. Android blocks plaintext
              HTTP by default since API 28 (Android 9) — without this flag
              every API call and the Socket.IO connection would silently

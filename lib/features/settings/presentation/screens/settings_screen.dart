@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../../../core/constants/app_colors.dart';
 import '../../../../core/utils/responsive_utils.dart';
@@ -10,6 +11,7 @@ import '../../../../core/printing/printer_status_pill.dart';
 import '../../../../core/printing/thermal_printer.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
 import '../../../branches/presentation/providers/branch_provider.dart';
+import '../../../../core/widgets/confirm_dialog.dart';
 import '../../../../core/widgets/notification_bell.dart';
 
 class SettingsScreen extends ConsumerStatefulWidget {
@@ -19,6 +21,13 @@ class SettingsScreen extends ConsumerStatefulWidget {
 }
 
 class _SettingsScreenState extends ConsumerState<SettingsScreen> {
+  Future<void> _signOut() async {
+    final confirmed = await showSignOutDialog(context);
+    if (!confirmed || !mounted) return;
+    await ref.read(authNotifierProvider.notifier).signOut();
+    if (mounted) context.go('/login');
+  }
+
   @override
   Widget build(BuildContext context) {
     final profile = ref.watch(authNotifierProvider).value;
@@ -92,6 +101,45 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 _InfoRow('Local Cache Status', 'Ready'),
               ]),
             ),
+            // Desktop reaches Sign Out from the side-rail footer. Below that
+            // breakpoint the rail is gone, and roles whose nav fits without a
+            // "More" overflow (super_admin) have no other way to reach it.
+            if (!context.isDesktop) ...[
+              const SizedBox(height: 24),
+              const _SectionHeader('Account'),
+              const SizedBox(height: 12),
+              Container(
+                width: double.infinity,
+                decoration: BoxDecoration(
+                  gradient: AppColors.brandGradient,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(12),
+                    onTap: _signOut,
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Row(children: [
+                        Container(
+                          width: 48, height: 48,
+                          decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.18), borderRadius: BorderRadius.circular(10)),
+                          child: const Icon(Icons.logout_rounded, color: AppColors.onPrimary),
+                        ),
+                        const SizedBox(width: 14),
+                        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                          Text('Sign Out', style: GoogleFonts.outfit(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.onPrimary)),
+                          Text(profile?.fullName ?? 'Signed in', style: GoogleFonts.outfit(fontSize: 12, color: Colors.white.withValues(alpha: 0.75)), overflow: TextOverflow.ellipsis),
+                        ])),
+                        Icon(Icons.chevron_right_rounded, color: Colors.white.withValues(alpha: 0.75)),
+                      ]),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+            const SizedBox(height: 24),
           ],
         ),
       )),

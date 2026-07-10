@@ -41,6 +41,9 @@ class AppColors {
   static const Color gradientStart = Color(0xFFC0392B);
   static const Color gradientEnd = Color(0xFF7B241C);
 
+  static const LinearGradient brandGradient =
+      LinearGradient(colors: [gradientStart, gradientEnd]);
+
   // Role Colors
   static const Color roleManager = Color(0xFFC0392B);
   static const Color roleCashier = Color(0xFF2980B9);

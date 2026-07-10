@@ -48,14 +48,7 @@ class AppShell extends ConsumerWidget {
               currentPath: currentPath,
               profile: profile,
               onSignOut: () async {
-                final confirmed = await showConfirmDialog(
-                  context,
-                  title: 'Sign Out?',
-                  message:
-                      'You will be signed out and need to log in again to continue.',
-                  confirmLabel: 'Sign Out',
-                  icon: Icons.logout_rounded,
-                );
+                final confirmed = await showSignOutDialog(context);
                 if (!confirmed) return;
                 await ref.read(authNotifierProvider.notifier).signOut();
                 if (context.mounted) context.go('/login');
@@ -71,12 +64,17 @@ class AppShell extends ConsumerWidget {
     // 4 rather than 5 so that "More" still fits inside Material's
     // 5-destination guidance for a NavigationBar.
     const maxVisible = 4;
-    final visibleItems = navItems.length <= maxVisible
-        ? navItems
-        : navItems.take(maxVisible).toList();
-    final overflowItems = navItems.length <= maxVisible
-        ? <NavItem>[]
-        : navItems.skip(maxVisible).toList();
+    final visibleItems = navItems.take(maxVisible).toList();
+    final overflowItems = navItems.skip(maxVisible).toList();
+
+    // "More" is the last destination when it has a reason to exist: either
+    // nav overflowed into it, or the role has no Settings screen — Settings
+    // is where Sign Out otherwise lives at this breakpoint, and there's no
+    // side rail down here to fall back on. A role with neither (super_admin,
+    // kitchen) would get an empty sheet, so drop the tab entirely.
+    final hasSettings = navItems.any((i) => i.path == '/settings');
+    final showMore = overflowItems.isNotEmpty || !hasSettings;
+    final moreIndex = showMore ? visibleItems.length : -1;
 
     // Determine selected index; -1 if current path is in overflow
     int currentIdx = visibleItems
@@ -84,8 +82,6 @@ class AppShell extends ConsumerWidget {
     final isInOverflow = currentIdx < 0 &&
         overflowItems.any((i) => currentPath.startsWith(i.path));
 
-    // Tab order: [...visible, More?]
-    final moreIndex = overflowItems.isNotEmpty ? visibleItems.length : -1;
     final selectedIndex = isInOverflow
         ? moreIndex
         : (currentIdx < 0 ? 0 : currentIdx);
@@ -99,9 +95,9 @@ class AppShell extends ConsumerWidget {
         backgroundColor: AppColors.surface,
         indicatorColor: AppColors.primary.withValues(alpha: 0.12),
         onDestinationSelected: (i) {
-          if (overflowItems.isNotEmpty && i == moreIndex) {
+          if (showMore && i == moreIndex) {
             _showMoreSheet(context, overflowItems, ref);
-          } else if (i < visibleItems.length) {
+          } else {
             context.go(visibleItems[i].path);
           }
         },
@@ -111,7 +107,7 @@ class AppShell extends ConsumerWidget {
                 selectedIcon: Icon(item.activeIcon, color: AppColors.primary),
                 label: item.label,
               )),
-          if (overflowItems.isNotEmpty)
+          if (showMore)
             const NavigationDestination(
               icon: Icon(Icons.more_horiz_rounded,
                   color: AppColors.textSecondary),
@@ -149,12 +145,14 @@ class AppShell extends ConsumerWidget {
                 ),
               ),
               const SizedBox(height: 16),
-              Text('More',
+              // Roles with no overflow open this sheet purely for Sign Out.
+              Text(items.isEmpty ? 'Account' : 'More',
                   style: GoogleFonts.outfit(
                       fontSize: 16,
                       fontWeight: FontWeight.w700,
                       color: AppColors.textPrimary)),
               const SizedBox(height: 12),
+              if (items.isNotEmpty)
               Flexible(
                 child: GridView.builder(
                 shrinkWrap: true,
@@ -220,37 +218,42 @@ class AppShell extends ConsumerWidget {
               ),
               ),
               const SizedBox(height: 8),
-              SizedBox(
+              // Matches the Sign Out card at the bottom of Settings, so the
+              // action looks the same wherever a role happens to reach it.
+              Container(
                 width: double.infinity,
-                child: TextButton(
-                  onPressed: () async {
-                    Navigator.pop(ctx);
-                    if (!context.mounted) return;
-                    final confirmed = await showConfirmDialog(
-                      context,
-                      title: 'Sign Out?',
-                      message:
-                          'You will be signed out and need to log in again to continue.',
-                      confirmLabel: 'Sign Out',
-                      icon: Icons.logout_rounded,
-                    );
-                    if (!confirmed || !context.mounted) return;
-                    await ref.read(authNotifierProvider.notifier).signOut();
-                    if (context.mounted) context.go('/login');
-                  },
-                  style: TextButton.styleFrom(
-                    foregroundColor: AppColors.error,
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                  ),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      const Icon(Icons.logout_rounded, size: 18),
-                      const SizedBox(width: 8),
-                      Text('Sign Out',
-                          style: GoogleFonts.outfit(
-                              fontSize: 14, fontWeight: FontWeight.w600)),
-                    ],
+                decoration: BoxDecoration(
+                  gradient: AppColors.brandGradient,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(12),
+                    onTap: () async {
+                      Navigator.pop(ctx);
+                      if (!context.mounted) return;
+                      final confirmed = await showSignOutDialog(context);
+                      if (!confirmed || !context.mounted) return;
+                      await ref.read(authNotifierProvider.notifier).signOut();
+                      if (context.mounted) context.go('/login');
+                    },
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          const Icon(Icons.logout_rounded,
+                              size: 18, color: AppColors.onPrimary),
+                          const SizedBox(width: 8),
+                          Text('Sign Out',
+                              style: GoogleFonts.outfit(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600,
+                                  color: AppColors.onPrimary)),
+                        ],
+                      ),
+                    ),
                   ),
                 ),
               ),

@@ -810,13 +810,12 @@ class _ModernFieldState extends State<_ModernField> {
         const SizedBox(height: 8),
         AnimatedContainer(
           duration: const Duration(milliseconds: 180),
-          clipBehavior: Clip.antiAlias,
           decoration: BoxDecoration(
-            color: _focused ? Colors.white : const Color(0xFFF7F7F7),
+            color: _focused ? Colors.white : const Color(0xFFF9FAFB),
             borderRadius: BorderRadius.circular(14),
             border: Border.all(
-              color: _focused ? AppColors.primary : AppColors.border,
-              width: _focused ? 1.6 : 1,
+              color: _focused ? AppColors.primary : const Color(0xFFD5D8DE),
+              width: _focused ? 1.6 : 1.2,
             ),
             boxShadow: _focused
                 ? [
@@ -826,7 +825,7 @@ class _ModernFieldState extends State<_ModernField> {
                       offset: const Offset(0, 4),
                     ),
                   ]
-                : [],
+                : null,
           ),
           child: TextFormField(
             controller: widget.controller,
