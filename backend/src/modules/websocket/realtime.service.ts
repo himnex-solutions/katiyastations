@@ -9,19 +9,34 @@ import { AppGateway, SocketEvents, SocketRooms } from './app.gateway';
 export class RealtimeService {
   constructor(private readonly gateway: AppGateway) {}
 
+  /**
+   * Every client joins both `kitchen:<branch>` and `branch:<branch>`, so these
+   * go out as one emit to both rooms rather than one emit each: two emits meant
+   * two deliveries, and the kitchen print station auto-printed every ticket
+   * twice. See AppGateway.emitToRooms.
+   */
   kotNew(branchId: string, payload: unknown) {
-    this.gateway.emitToRoom(SocketRooms.kitchen(branchId), SocketEvents.kotNew, payload);
-    this.gateway.emitToRoom(SocketRooms.branch(branchId), SocketEvents.kotNew, payload);
+    this.gateway.emitToRooms(
+      [SocketRooms.kitchen(branchId), SocketRooms.branch(branchId)],
+      SocketEvents.kotNew,
+      payload,
+    );
   }
 
   kotStatusChanged(branchId: string, payload: unknown) {
-    this.gateway.emitToRoom(SocketRooms.kitchen(branchId), SocketEvents.kotStatusChanged, payload);
-    this.gateway.emitToRoom(SocketRooms.branch(branchId), SocketEvents.kotStatusChanged, payload);
+    this.gateway.emitToRooms(
+      [SocketRooms.kitchen(branchId), SocketRooms.branch(branchId)],
+      SocketEvents.kotStatusChanged,
+      payload,
+    );
   }
 
   tableStatusChanged(branchId: string, tableId: string, payload: unknown) {
-    this.gateway.emitToRoom(SocketRooms.branch(branchId), SocketEvents.tableStatusChanged, payload);
-    this.gateway.emitToRoom(SocketRooms.table(tableId), SocketEvents.tableStatusChanged, payload);
+    this.gateway.emitToRooms(
+      [SocketRooms.branch(branchId), SocketRooms.table(tableId)],
+      SocketEvents.tableStatusChanged,
+      payload,
+    );
   }
 
   sessionOpened(branchId: string, payload: unknown) {
@@ -68,8 +83,11 @@ export class RealtimeService {
   }
 
   orderItemCancelled(branchId: string, payload: unknown) {
-    this.gateway.emitToRoom(SocketRooms.kitchen(branchId), SocketEvents.orderItemCancelled, payload);
-    this.gateway.emitToRoom(SocketRooms.branch(branchId), SocketEvents.orderItemCancelled, payload);
+    this.gateway.emitToRooms(
+      [SocketRooms.kitchen(branchId), SocketRooms.branch(branchId)],
+      SocketEvents.orderItemCancelled,
+      payload,
+    );
   }
 
   tableTransferred(branchId: string, payload: unknown) {
@@ -95,8 +113,11 @@ export class RealtimeService {
    * Every screen that lists the menu (menu management, waiter ordering) reloads.
    */
   menuChanged(branchId: string, payload: unknown) {
-    this.gateway.emitToRoom(SocketRooms.branch(branchId), SocketEvents.menuChanged, payload);
-    this.gateway.emitToRoom(SocketRooms.kitchen(branchId), SocketEvents.menuChanged, payload);
+    this.gateway.emitToRooms(
+      [SocketRooms.branch(branchId), SocketRooms.kitchen(branchId)],
+      SocketEvents.menuChanged,
+      payload,
+    );
   }
 
   /**

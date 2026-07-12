@@ -84,10 +84,9 @@ Future<void> printKotNow(
   final messenger = ScaffoldMessenger.of(context);
   final cfg = _readyPrinter(messenger, ref);
   if (cfg == null) return;
-  final branch = ref.read(currentBranchProvider).valueOrNull;
 
   try {
-    await thermalPrinter.printKotTicket(config: cfg, branch: branch, kot: kot);
+    await thermalPrinter.printKotTicket(config: cfg, kot: kot);
     _say(messenger, 'KOT printed to ${cfg.target}.', AppColors.success);
   } catch (e) {
     _say(messenger, 'Print failed: $e', AppColors.error);

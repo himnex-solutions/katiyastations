@@ -19,7 +19,6 @@ class _StubThermalPrinter implements ThermalPrinter {
   @override
   Future<void> printKotTicket({
     required PrinterConfig config,
-    Map<String, dynamic>? branch,
     required Map<String, dynamic> kot,
   }) async {
     throw UnsupportedError('Thermal printing is not available on this platform');

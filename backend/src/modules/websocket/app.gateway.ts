@@ -103,4 +103,18 @@ export class AppGateway implements OnGatewayConnection, OnGatewayDisconnect {
   emitToRoom(room: string, event: string, payload: unknown) {
     this.server.to(room).emit(event, payload);
   }
+
+  /**
+   * Delivers one event to sockets in any of [rooms] — **once each**, even for a
+   * socket that belongs to several of them.
+   *
+   * Calling emitToRoom() once per room does not do this: each call is its own
+   * broadcast, so a client in both `kitchen:<b>` and `branch:<b>` (which is
+   * every client — see socket_client.dart joinBranchRoom) received the same
+   * `kot:new` twice and auto-printed the ticket twice. Socket.IO de-duplicates
+   * recipients within a single `.to([...])` emit, so this cannot.
+   */
+  emitToRooms(rooms: string[], event: string, payload: unknown) {
+    this.server.to(rooms).emit(event, payload);
+  }
 }

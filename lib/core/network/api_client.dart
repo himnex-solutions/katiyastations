@@ -53,10 +53,16 @@ class ApiClient {
     _dio.interceptors.add(_JwtInterceptor(_dio));
 
     // ── Logger (dev only) ──────────────────────────────────
+    //
+    // Request headers stay OFF. The only one that isn't a constant is
+    // `Authorization: Bearer …`, and a printed access token is a working key to
+    // the whole API for as long as it lives — one screen share, screenshot or
+    // pasted console dump is enough to hand it over. Bodies and responses,
+    // which is what you actually debug against, are still here.
     if (kDebugMode) {
       _dio.interceptors.add(
         PrettyDioLogger(
-          requestHeader: true,
+          requestHeader: false,
           requestBody: true,
           responseBody: true,
           responseHeader: false,

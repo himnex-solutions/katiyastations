@@ -229,6 +229,24 @@ class _KitchenTabViewState extends State<_KitchenTabView>
           ),
         );
 
+  /// One tab of three. A phone splits the bar into thirds — ~110px each — which
+  /// an icon, a word and a count badge do not fit at their natural size, so the
+  /// label is the part that gives way.
+  Widget _tab(IconData icon, String label, int count, Color color) => Tab(
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, size: 16),
+            const SizedBox(width: 4),
+            Flexible(
+              child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis),
+            ),
+            _badge(count, color),
+          ],
+        ),
+      );
+
   @override
   Widget build(BuildContext context) {
     return Column(
@@ -240,45 +258,14 @@ class _KitchenTabViewState extends State<_KitchenTabView>
             indicatorColor: AppColors.primary,
             labelColor: AppColors.primary,
             unselectedLabelColor: AppColors.textSecondary,
+            // The default 16px each side is more than a narrow phone can spare.
+            labelPadding: const EdgeInsets.symmetric(horizontal: 6),
             labelStyle: GoogleFonts.outfit(fontWeight: FontWeight.w600, fontSize: 13),
             unselectedLabelStyle: GoogleFonts.outfit(fontWeight: FontWeight.w400, fontSize: 13),
             tabs: [
-              Tab(
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    const Icon(Icons.hourglass_empty_rounded, size: 16),
-                    const SizedBox(width: 4),
-                    const Text('Pending'),
-                    _badge(widget.pending.length, AppColors.warning),
-                  ],
-                ),
-              ),
-              Tab(
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    const Icon(Icons.whatshot_rounded, size: 16),
-                    const SizedBox(width: 4),
-                    const Text('Preparing'),
-                    _badge(widget.preparing.length, AppColors.info),
-                  ],
-                ),
-              ),
-              Tab(
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    const Icon(Icons.check_circle_rounded, size: 16),
-                    const SizedBox(width: 4),
-                    const Text('Ready'),
-                    _badge(widget.ready.length, AppColors.success),
-                  ],
-                ),
-              ),
+              _tab(Icons.hourglass_empty_rounded, 'Pending', widget.pending.length, AppColors.warning),
+              _tab(Icons.whatshot_rounded, 'Preparing', widget.preparing.length, AppColors.info),
+              _tab(Icons.check_circle_rounded, 'Ready', widget.ready.length, AppColors.success),
             ],
           ),
         ),
@@ -381,9 +368,16 @@ class _KanbanColumn extends StatelessWidget {
                 children: [
                   Icon(icon, color: color, size: 20),
                   const SizedBox(width: 8),
-                  Text(title,
-                      style: GoogleFonts.outfit(fontSize: 15, fontWeight: FontWeight.w600, color: color)),
-                  const Spacer(),
+                  // Takes the free space and ellipsises rather than pushing the
+                  // count chip off a narrow column ("Ready to Serve" is wide).
+                  Expanded(
+                    child: Text(title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: GoogleFonts.outfit(
+                            fontSize: 15, fontWeight: FontWeight.w600, color: color)),
+                  ),
+                  const SizedBox(width: 8),
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                     decoration: BoxDecoration(
@@ -458,45 +452,74 @@ class _KotCard extends ConsumerWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Header
+          // Header. Two lines, each with exactly one element that can give way:
+          // a Kanban column on a 600px tablet leaves the card barely 130px, and
+          // the KOT id ("KOT-20260712-4F82"), the table, the elapsed chip and
+          // the print button cannot share a single row at that width — they
+          // used to overflow it by ~100px.
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            padding: const EdgeInsets.fromLTRB(14, 8, 6, 8),
             decoration: BoxDecoration(
               color: color.withValues(alpha: 0.06),
               borderRadius: const BorderRadius.vertical(top: Radius.circular(11)),
             ),
-            child: Row(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
               children: [
-                Text(kot.kotNumber,
-                    style: GoogleFonts.outfit(fontSize: 14, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
-                const SizedBox(width: 8),
-                const Icon(Icons.table_restaurant_rounded, size: 13, color: AppColors.textSecondary),
-                const SizedBox(width: 3),
-                Expanded(child: Text(
-                    kot.tableNumber != null ? 'Table ${kot.tableNumber}' : 'Table —',
-                    style: GoogleFonts.outfit(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textSecondary),
-                    overflow: TextOverflow.ellipsis)),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                  decoration: BoxDecoration(
-                    color: _elapsedColor().withValues(alpha: 0.15),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Text(_elapsedLabel(),
-                      style: GoogleFonts.outfit(fontSize: 10, color: _elapsedColor(), fontWeight: FontWeight.w600)),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(kot.kotNumber,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: GoogleFonts.outfit(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w700,
+                              color: AppColors.textPrimary)),
+                    ),
+                    SizedBox(
+                      width: 28,
+                      height: 28,
+                      child: IconButton(
+                        padding: EdgeInsets.zero,
+                        icon: const Icon(Icons.print_rounded, size: 16, color: AppColors.textSecondary),
+                        tooltip: 'Print KOT',
+                        onPressed: () {
+                          final items = itemsAsync.value ?? const <KotItem>[];
+                          _printKot(context, ref, items);
+                        },
+                      ),
+                    ),
+                  ],
                 ),
-                SizedBox(
-                  width: 28,
-                  height: 28,
-                  child: IconButton(
-                    padding: EdgeInsets.zero,
-                    icon: const Icon(Icons.print_rounded, size: 16, color: AppColors.textSecondary),
-                    tooltip: 'Print KOT',
-                    onPressed: () {
-                      final items = itemsAsync.value ?? const <KotItem>[];
-                      _printKot(context, ref, items);
-                    },
-                  ),
+                Row(
+                  children: [
+                    const Icon(Icons.table_restaurant_rounded, size: 13, color: AppColors.textSecondary),
+                    const SizedBox(width: 3),
+                    Expanded(
+                      child: Text(
+                          kot.tableNumber != null ? 'Table ${kot.tableNumber}' : 'Table —',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: GoogleFonts.outfit(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: AppColors.textSecondary)),
+                    ),
+                    const SizedBox(width: 6),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: _elapsedColor().withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(_elapsedLabel(),
+                          maxLines: 1,
+                          style: GoogleFonts.outfit(
+                              fontSize: 10, color: _elapsedColor(), fontWeight: FontWeight.w600)),
+                    ),
+                    const SizedBox(width: 8),
+                  ],
                 ),
               ],
             ),
@@ -633,10 +656,11 @@ class _KotCard extends ConsumerWidget {
   }
 
   // ─────────────────────────────────────────────────────────
-  //  PRINT KOT — kitchen ticket, no prices, real branch name.
+  //  PRINT KOT — kitchen ticket: no branch name, address or phone, no
+  //  prices. Table, KOT id, time and the items, all bold. The preview
+  //  mirrors what the ESC/POS builder puts on paper.
   // ─────────────────────────────────────────────────────────
   void _printKot(BuildContext context, WidgetRef ref, List<KotItem> items) {
-    final branch = ref.read(currentBranchProvider).value;
     final dateStr = formatDateTime(kot.createdAt);
 
     showThermalPrintDialog(
@@ -650,7 +674,7 @@ class _KotCard extends ConsumerWidget {
         kot: {
           'kotNumber': kot.kotNumber,
           'tableNumber': kot.tableNumber,
-          'waiterName': kot.waiterName,
+          'notes': kot.notes,
           'createdAt': kot.createdAt.toIso8601String(),
           'items': items
               .map((i) => {
@@ -665,16 +689,16 @@ class _KotCard extends ConsumerWidget {
       receipt: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          receiptBranchHeader(branch),
-          receiptDivider(),
-          const SizedBox(height: 4),
-          Text('KITCHEN ORDER TICKET',
-              textAlign: TextAlign.center, style: receiptStyle(fontSize: 12, weight: FontWeight.bold)),
-          const SizedBox(height: 4),
-          receiptRow('KOT No:', kot.kotNumber, weight: FontWeight.bold),
-          receiptRow('Table:', kot.tableNumber ?? '—'),
-          receiptRow('Waiter:', kot.waiterName ?? '—'),
-          receiptRow('Time:', dateStr),
+          Text(kot.tableNumber != null ? 'TABLE ${kot.tableNumber}' : 'TAKEAWAY',
+              textAlign: TextAlign.center,
+              style: receiptStyle(fontSize: 26, weight: FontWeight.bold)),
+          const SizedBox(height: 2),
+          Text(kot.kotNumber,
+              textAlign: TextAlign.center,
+              style: receiptStyle(fontSize: 12, weight: FontWeight.bold)),
+          Text(dateStr,
+              textAlign: TextAlign.center,
+              style: receiptStyle(fontSize: 12, weight: FontWeight.bold)),
           const SizedBox(height: 4),
           receiptDivider(),
           const SizedBox(height: 4),
@@ -686,12 +710,13 @@ class _KotCard extends ConsumerWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('${item.quantity} x ${item.menuItemName}',
-                          style: receiptStyle(fontSize: 13, weight: FontWeight.bold)),
+                      Text('${item.quantity} x ${item.menuItemName.toUpperCase()}',
+                          style: receiptStyle(fontSize: 15, weight: FontWeight.bold)),
                       if (item.notes != null && item.notes!.isNotEmpty)
                         Padding(
                           padding: const EdgeInsets.only(left: 14),
-                          child: Text('- ${item.notes}', style: receiptStyle(fontSize: 11)),
+                          child: Text('>> ${item.notes}',
+                              style: receiptStyle(fontSize: 12, weight: FontWeight.bold)),
                         ),
                     ],
                   ),
@@ -700,8 +725,15 @@ class _KotCard extends ConsumerWidget {
             const SizedBox(height: 4),
             receiptDivider(),
             const SizedBox(height: 4),
-            Text('Note: ${kot.notes}', style: receiptStyle(fontSize: 11)),
+            Text('NOTE: ${kot.notes}',
+                style: receiptStyle(fontSize: 12, weight: FontWeight.bold)),
           ],
+          const SizedBox(height: 4),
+          receiptDivider(),
+          const SizedBox(height: 2),
+          Text('Total items: ${items.fold<int>(0, (sum, i) => sum + i.quantity)}',
+              textAlign: TextAlign.right,
+              style: receiptStyle(fontSize: 12, weight: FontWeight.bold)),
         ],
       ),
     );

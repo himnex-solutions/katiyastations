@@ -20,12 +20,13 @@ abstract class ThermalPrinter {
   /// Network printers are addressed by IP directly (no scan).
   Future<List<DiscoveredPrinter>> discover(PrinterKind kind, {bool isBle = false});
 
-  /// Prints a Kitchen Order Ticket for [kot] (item names + quantities,
-  /// table number, waiter name). Accepts either the socket payload
-  /// (camelCase) or a REST record (snake_case).
+  /// Prints a Kitchen Order Ticket for [kot] — table number, KOT id, time and
+  /// the items with their quantities and notes. Accepts either the socket
+  /// payload (camelCase) or a REST record (snake_case).
+  ///
+  /// Takes no branch: the kitchen ticket carries no name, address or phone.
   Future<void> printKotTicket({
     required PrinterConfig config,
-    Map<String, dynamic>? branch,
     required Map<String, dynamic> kot,
   });
 

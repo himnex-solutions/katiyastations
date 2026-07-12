@@ -14,6 +14,7 @@ import 'package:flutter_pos_printer_platform_image_3/flutter_pos_printer_platfor
 import 'package:intl/intl.dart';
 
 import '../utils/date_time_utils.dart';
+import 'kot_ticket.dart';
 import 'printer_config.dart';
 import 'thermal_printer.dart';
 
@@ -70,10 +71,9 @@ class _IoThermalPrinter implements ThermalPrinter {
   @override
   Future<void> printKotTicket({
     required PrinterConfig config,
-    Map<String, dynamic>? branch,
     required Map<String, dynamic> kot,
   }) async {
-    await _send(config, await _buildKotBytes(config, branch, kot));
+    await _send(config, await buildKotBytes(config, kot, profile: await _profile()));
   }
 
   @override
@@ -273,50 +273,6 @@ class _IoThermalPrinter implements ThermalPrinter {
     return (n != null && n.isNotEmpty ? n : 'KATIYA STATION').toUpperCase();
   }
 
-  Future<List<int>> _buildKotBytes(PrinterConfig cfg, Map<String, dynamic>? branch, Map<String, dynamic> kot) async {
-    final g = Generator(_paper(cfg), await _profile());
-    var b = <int>[];
-
-    final table = _f(kot, 'tableNumber', 'table_number');
-    final kotNo = _f(kot, 'kotNumber', 'kot_number');
-    final waiter = _f(kot, 'waiterName', 'waiter_name');
-    final createdRaw = kot['createdAt'] ?? kot['created_at'];
-    final when = DateTime.tryParse(createdRaw?.toString() ?? '') ?? DateTime.now();
-    final items = (kot['items'] as List?) ?? const [];
-
-    b += g.text(_branchName(branch),
-        styles: const PosStyles(align: PosAlign.center, bold: true, height: PosTextSize.size2, width: PosTextSize.size2));
-    b += g.text('KITCHEN ORDER — KOT', styles: const PosStyles(align: PosAlign.center, bold: true));
-    b += g.hr(ch: '=');
-
-    if (table.isNotEmpty) {
-      b += g.text('TABLE  $table',
-          styles: const PosStyles(bold: true, height: PosTextSize.size2, width: PosTextSize.size2));
-    }
-    if (kotNo.isNotEmpty) b += g.text('KOT #: $kotNo');
-    if (waiter.isNotEmpty) b += g.text('Waiter: $waiter');
-    b += g.text('Time : ${formatDateTime(when)}');
-    b += g.hr();
-
-    var totalQty = 0;
-    for (final raw in items) {
-      if (raw is! Map) continue;
-      if ((raw['status'] as String?) == 'cancelled') continue;
-      final name = (raw['name'] as String?)?.trim();
-      if (name == null || name.isEmpty) continue;
-      final qty = (raw['quantity'] as num?)?.toInt() ?? 1;
-      totalQty += qty;
-      b += g.text('$qty x $name', styles: const PosStyles(bold: true, height: PosTextSize.size2));
-      final note = (raw['note'] as String?)?.trim();
-      if (note != null && note.isNotEmpty) b += g.text('    >> $note');
-    }
-
-    b += g.hr();
-    b += g.text('Total items: $totalQty', styles: const PosStyles(bold: true, align: PosAlign.right));
-    b += g.feed(2);
-    b += g.cut();
-    return b;
-  }
 
   /// Two-column money line: label left, amount right-aligned to the paper edge.
   List<int> _money(Generator g, String label, double value, {bool bold = false}) =>

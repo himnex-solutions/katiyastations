@@ -12,7 +12,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../app_messenger.dart';
 import '../constants/app_colors.dart';
 import '../network/socket_client.dart';
-import '../../features/branches/presentation/providers/branch_provider.dart';
+import 'kot_print_queue.dart';
 import 'printer_config.dart';
 import 'thermal_printer.dart';
 
@@ -20,24 +20,27 @@ final kotAutoPrintProvider = Provider<void>((ref) {
   // Nothing to print on unsupported platforms (e.g. web).
   if (!thermalPrinter.supported) return;
 
-  final sub = SocketClient.instance.onKotNew().listen((data) async {
+  // Three waiters can hit Send in the same second. The queue prints their
+  // tickets one after another, in the order the backend accepted them, instead
+  // of firing overlapping prints at one printer.
+  final queue = KotPrintQueue(
+    printKot: (kot) async {
+      // Re-read at print time: the config can change while a ticket waits.
+      final cfg = ref.read(printerConfigProvider);
+      if (!cfg.autoPrintKot || !cfg.configured) return;
+      await thermalPrinter.printKotTicket(config: cfg, kot: kot);
+    },
+    // A failed auto-print must never crash the floor app — the kitchen still
+    // sees the ticket on screen and can reprint from there. But it must not be
+    // silent either: a printer that is off or out of paper would otherwise drop
+    // tickets with nobody any the wiser.
+    onError: _warnPrintFailed,
+  );
+
+  final sub = SocketClient.instance.onKotNew().listen((data) {
     final cfg = ref.read(printerConfigProvider);
     if (!cfg.autoPrintKot || !cfg.configured) return;
-
-    final branch = ref.read(currentBranchProvider).valueOrNull;
-    try {
-      await thermalPrinter.printKotTicket(
-        config: cfg,
-        branch: branch,
-        kot: Map<String, dynamic>.from(data),
-      );
-    } catch (e) {
-      // A failed auto-print must never crash the floor app — the kitchen
-      // still sees the ticket on screen and can reprint from there. But it
-      // must not be silent either: a printer that is off or out of paper
-      // would otherwise drop tickets with nobody any the wiser.
-      _warnPrintFailed(data, e);
-    }
+    queue.add(Map<String, dynamic>.from(data));
   });
 
   ref.onDispose(sub.cancel);
