@@ -12,6 +12,7 @@ import '../../../../core/constants/app_colors.dart';
 import '../../../../core/widgets/confirm_dialog.dart';
 import '../../../../core/constants/api_constants.dart';
 import '../../../../core/network/api_client.dart';
+import '../../../../core/utils/date_time_utils.dart';
 import '../../../../core/utils/responsive_utils.dart';
 import '../../../../core/widgets/reset_password_dialog.dart';
 import '../../../../core/widgets/notification_bell.dart';
@@ -656,7 +657,7 @@ class _AccessLogsTab extends ConsumerWidget {
             final targetUser = users.where((u) => u['id'] == log['row_id']).firstOrNull;
             final target = targetUser?['full_name'] as String? ?? '—';
             final at = log['created_at'] != null
-                ? DateTime.parse(log['created_at'] as String).toLocal()
+                ? DateTime.parse(log['created_at'] as String)
                 : null;
 
             final (color, icon) = switch (action) {
@@ -699,7 +700,7 @@ class _AccessLogsTab extends ConsumerWidget {
                 ),
                 if (at != null)
                   Text(
-                    '${at.day}/${at.month} ${at.hour}:${at.minute.toString().padLeft(2, '0')}',
+                    formatShortDateTime(at),
                     style: GoogleFonts.outfit(
                         fontSize: 11, color: AppColors.textHint),
                   ),

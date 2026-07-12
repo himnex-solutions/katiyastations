@@ -13,6 +13,7 @@ import 'package:esc_pos_utils_plus/esc_pos_utils_plus.dart';
 import 'package:flutter_pos_printer_platform_image_3/flutter_pos_printer_platform_image_3.dart';
 import 'package:intl/intl.dart';
 
+import '../utils/date_time_utils.dart';
 import 'printer_config.dart';
 import 'thermal_printer.dart';
 
@@ -280,7 +281,7 @@ class _IoThermalPrinter implements ThermalPrinter {
     final kotNo = _f(kot, 'kotNumber', 'kot_number');
     final waiter = _f(kot, 'waiterName', 'waiter_name');
     final createdRaw = kot['createdAt'] ?? kot['created_at'];
-    final when = DateTime.tryParse(createdRaw?.toString() ?? '')?.toLocal() ?? DateTime.now();
+    final when = DateTime.tryParse(createdRaw?.toString() ?? '') ?? DateTime.now();
     final items = (kot['items'] as List?) ?? const [];
 
     b += g.text(_branchName(branch),
@@ -294,7 +295,7 @@ class _IoThermalPrinter implements ThermalPrinter {
     }
     if (kotNo.isNotEmpty) b += g.text('KOT #: $kotNo');
     if (waiter.isNotEmpty) b += g.text('Waiter: $waiter');
-    b += g.text('Time : ${DateFormat('dd MMM yyyy, hh:mm a').format(when)}');
+    b += g.text('Time : ${formatDateTime(when)}');
     b += g.hr();
 
     var totalQty = 0;
@@ -346,7 +347,7 @@ class _IoThermalPrinter implements ThermalPrinter {
     final method = _f(bill, 'paymentMethod', 'payment_method').toUpperCase();
 
     final createdRaw = bill['createdAt'] ?? bill['created_at'];
-    final when = DateTime.tryParse(createdRaw?.toString() ?? '')?.toLocal() ?? DateTime.now();
+    final when = DateTime.tryParse(createdRaw?.toString() ?? '') ?? DateTime.now();
 
     final subtotal = _n(bill, 'subTotal', 'sub_total');
     final discount = _n(bill, 'discount', 'discount');
@@ -377,7 +378,7 @@ class _IoThermalPrinter implements ThermalPrinter {
     if (billNo.isNotEmpty) b += g.text('Bill No   : $billNo');
     if (table.isNotEmpty) b += g.text('Table     : $table');
     if (session.isNotEmpty) b += g.text('Session   : $session');
-    b += g.text('Date      : ${DateFormat('dd MMM yyyy, hh:mm a').format(when)}');
+    b += g.text('Date      : ${formatDateTime(when)}');
     if (cashier.isNotEmpty) b += g.text('Cashier   : $cashier');
     if (customer.isNotEmpty) b += g.text('Customer  : $customer');
     b += g.hr();
@@ -434,7 +435,7 @@ class _IoThermalPrinter implements ThermalPrinter {
     b += g.text('Connection: ${cfg.kindLabel}');
     b += g.text('Target    : ${cfg.target}');
     b += g.text('Paper     : ${cfg.paperMm}mm');
-    b += g.text('Time      : ${DateFormat('dd MMM yyyy, hh:mm a').format(DateTime.now())}');
+    b += g.text('Time      : ${formatDateTime(DateTime.now())}');
     b += g.hr();
     b += g.text('If you can read this, printing works!', styles: const PosStyles(align: PosAlign.center));
     b += g.feed(2);

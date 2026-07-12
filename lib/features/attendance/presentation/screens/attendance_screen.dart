@@ -2,8 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:intl/intl.dart';
 import '../../../../core/constants/app_colors.dart';
+import '../../../../core/utils/date_time_utils.dart';
 import '../../../../core/constants/api_constants.dart';
 import '../../../../core/network/api_client.dart';
 import '../../../../core/network/refresh_signals.dart';
@@ -161,7 +161,7 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> {
                         checkedOut
                             ? 'See you tomorrow!'
                             : (checkedIn
-                                ? 'Checked in at: ${DateFormat('hh:mm a').format(DateTime.parse(_todayRecord!['clock_in']))}'
+                                ? 'Checked in at: ${formatTime(DateTime.parse(_todayRecord!['clock_in']))}'
                                 : 'Press the button below to mark check-in for today'),
                         style: GoogleFonts.outfit(color: AppColors.textSecondary, fontSize: 14),
                         textAlign: TextAlign.center,

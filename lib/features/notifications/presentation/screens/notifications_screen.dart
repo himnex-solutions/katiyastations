@@ -2,9 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../../../core/constants/app_colors.dart';
+import '../../../../core/utils/date_time_utils.dart';
 import '../../../../core/utils/responsive_utils.dart';
 import '../../../../core/constants/api_constants.dart';
 import '../../../../core/network/api_client.dart';
@@ -95,23 +95,16 @@ final unreadNotificationCountProvider = Provider<int>((ref) {
   }).length;
 });
 
-/// `created_at` arrives as a UTC ISO-8601 instant. Rendering it without
-/// [DateTime.toLocal] shows Kathmandu staff a clock 5h45m behind the wall.
-DateTime? _localTime(Object? raw) {
+DateTime? _parseTime(Object? raw) {
   if (raw is! String) return null;
-  return DateTime.tryParse(raw)?.toLocal();
+  return DateTime.tryParse(raw);
 }
 
 /// Alerts live at most 12 hours, so they either happened today or late
 /// yesterday — the day only needs spelling out in the second case.
-String _timestampLabel(DateTime when) {
-  final now = DateTime.now();
-  final isToday =
-      when.year == now.year && when.month == now.month && when.day == now.day;
-  return isToday
-      ? DateFormat('hh:mm a').format(when)
-      : DateFormat('dd MMM, hh:mm a').format(when);
-}
+String _timestampLabel(DateTime when) => isSameNepalDay(when, DateTime.now())
+    ? formatTime(when)
+    : formatShortDateTime(when);
 
 class NotificationsScreen extends ConsumerStatefulWidget {
   const NotificationsScreen({super.key});
@@ -196,7 +189,7 @@ class _NotificationsScreenState extends ConsumerState<NotificationsScreen> {
                 itemCount: rows.length,
                 itemBuilder: (ctx, i) {
                   final n = rows[i];
-                  final when = _localTime(n['created_at']);
+                  final when = _parseTime(n['created_at']);
                   final title = (n['title'] ?? 'Notification').toString();
                   final isAlert = title.toLowerCase().contains('stock');
                   // "New" = arrived since the last time this device opened the

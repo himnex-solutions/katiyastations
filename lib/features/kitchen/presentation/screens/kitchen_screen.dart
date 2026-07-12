@@ -4,8 +4,8 @@ import 'package:flutter_animate/flutter_animate.dart' hide ShimmerEffect;
 import 'package:google_fonts/google_fonts.dart';
 import 'package:lottie/lottie.dart';
 import 'package:skeletonizer/skeletonizer.dart';
-import 'package:intl/intl.dart';
 import '../../../../core/constants/app_colors.dart';
+import '../../../../core/utils/date_time_utils.dart';
 import '../../../../core/utils/responsive_utils.dart';
 import '../../../../core/printing/print_actions.dart';
 import '../../../../core/widgets/confirm_dialog.dart';
@@ -637,7 +637,7 @@ class _KotCard extends ConsumerWidget {
   // ─────────────────────────────────────────────────────────
   void _printKot(BuildContext context, WidgetRef ref, List<KotItem> items) {
     final branch = ref.read(currentBranchProvider).value;
-    final dateStr = DateFormat('yyyy-MM-dd HH:mm').format(kot.createdAt);
+    final dateStr = formatDateTime(kot.createdAt);
 
     showThermalPrintDialog(
       context,

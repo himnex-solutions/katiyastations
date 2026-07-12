@@ -66,13 +66,20 @@ class KatiyaStationApp extends ConsumerWidget {
       theme: AppTheme.darkTheme,
       scaffoldMessengerKey: scaffoldMessengerKey,
       routerConfig: router,
-      builder: (context, child) => ResponsiveBreakpoints.builder(
-        child: child!,
-        breakpoints: [
-          const Breakpoint(start: 0, end: 599, name: MOBILE),
-          const Breakpoint(start: 600, end: 899, name: TABLET),
-          const Breakpoint(start: 900, end: double.infinity, name: DESKTOP),
-        ],
+      builder: (context, child) => MediaQuery(
+        // Nepal reads the clock in 12-hour form. Without this, time pickers and
+        // TimeOfDay.format() follow the machine's clock setting, so a POS with
+        // Windows set to 24-hour would show 14:30 where the rest of the app
+        // says 02:30 PM.
+        data: MediaQuery.of(context).copyWith(alwaysUse24HourFormat: false),
+        child: ResponsiveBreakpoints.builder(
+          child: child!,
+          breakpoints: [
+            const Breakpoint(start: 0, end: 599, name: MOBILE),
+            const Breakpoint(start: 600, end: 899, name: TABLET),
+            const Breakpoint(start: 900, end: double.infinity, name: DESKTOP),
+          ],
+        ),
       ),
     );
   }

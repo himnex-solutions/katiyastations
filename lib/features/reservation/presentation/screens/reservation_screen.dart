@@ -2,8 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:intl/intl.dart';
 import '../../../../core/constants/app_colors.dart';
+import '../../../../core/utils/date_time_utils.dart';
 import '../../../../core/utils/responsive_utils.dart';
 import '../../../../core/constants/api_constants.dart';
 import '../../../../core/network/api_client.dart';
@@ -21,6 +21,13 @@ final reservationsProvider = FutureProvider<List<Map<String, dynamic>>>((ref) as
   final data = response.data as Map<String, dynamic>;
   return List<Map<String, dynamic>>.from(data['data'] as List? ?? []);
 });
+
+/// The API hands `reservation_time` back as a raw ISO instant, which is not
+/// something to put in front of a guest.
+String _reservationTimeLabel(Object? raw) {
+  final when = raw is String ? DateTime.tryParse(raw) : null;
+  return when == null ? '—' : formatDateTime(when);
+}
 
 class ReservationScreen extends ConsumerStatefulWidget {
   const ReservationScreen({super.key});
@@ -129,7 +136,7 @@ class _ReservationScreenState extends ConsumerState<ReservationScreen> {
                         Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                           Text(r['customer_name'] ?? 'Guest', style: GoogleFonts.outfit(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
                           Text('${r['guest_count'] ?? 1} guests • ${r['customer_phone'] ?? '—'}', style: GoogleFonts.outfit(fontSize: 12, color: AppColors.textSecondary)),
-                          Text(r['reservation_time'] ?? '', style: GoogleFonts.outfit(fontSize: 12, color: AppColors.primary)),
+                          Text(_reservationTimeLabel(r['reservation_time']), style: GoogleFonts.outfit(fontSize: 12, color: AppColors.primary)),
                         ])),
                         Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
                           Container(
@@ -203,7 +210,7 @@ class _ReservationScreenState extends ConsumerState<ReservationScreen> {
             child: Row(children: [
               const Icon(Icons.calendar_today_rounded, color: AppColors.primary, size: 18),
               const SizedBox(width: 10),
-              Text(DateFormat('dd MMM yyyy, HH:mm').format(selectedDate), style: GoogleFonts.outfit(color: AppColors.textPrimary)),
+              Text(formatDateTime(selectedDate), style: GoogleFonts.outfit(color: AppColors.textPrimary)),
             ]),
           ),
         ),

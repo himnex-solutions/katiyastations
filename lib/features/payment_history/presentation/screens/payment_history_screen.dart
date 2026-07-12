@@ -4,6 +4,7 @@ import 'package:flutter_animate/flutter_animate.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import '../../../../core/constants/app_colors.dart';
+import '../../../../core/utils/date_time_utils.dart';
 import '../../../../core/utils/responsive_utils.dart';
 import '../../../../core/constants/api_constants.dart';
 import '../../../../core/network/api_client.dart';
@@ -214,7 +215,7 @@ class _PaymentCard extends StatelessWidget {
         const SizedBox(width: 14),
         Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text(bill.invoiceNumber, style: GoogleFonts.outfit(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
-          Text('${bill.customerName ?? 'Walk-in'} • ${bill.paymentMethod.toUpperCase()} • ${DateFormat('dd MMM, HH:mm').format(bill.createdAt)}',
+          Text('${bill.customerName ?? 'Walk-in'} • ${bill.paymentMethod.toUpperCase()} • ${formatShortDateTime(bill.createdAt)}',
               style: GoogleFonts.outfit(fontSize: 12, color: AppColors.textSecondary)),
         ])),
         Column(crossAxisAlignment: CrossAxisAlignment.end, children: [

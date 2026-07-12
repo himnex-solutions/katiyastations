@@ -2,11 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_animate/flutter_animate.dart' hide ShimmerEffect;
 import 'package:google_fonts/google_fonts.dart';
-import 'package:intl/intl.dart';
 import 'package:pluto_grid/pluto_grid.dart';
 import 'package:skeletonizer/skeletonizer.dart';
 import '../../../../core/constants/app_colors.dart';
 import '../../../../core/constants/api_constants.dart';
+import '../../../../core/utils/date_time_utils.dart';
 import '../../../../core/network/api_client.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
 import '../../../../core/widgets/notification_bell.dart';
@@ -161,7 +161,7 @@ class _AuditLogScreenState extends ConsumerState<AuditLogScreen> {
   List<PlutoRow> _buildRows(List<Map<String, dynamic>> logs) {
     return logs.map((log) {
       final createdAt = log['created_at'] != null
-          ? DateFormat('dd MMM yy, HH:mm').format(DateTime.parse(log['created_at'] as String).toLocal())
+          ? formatCompactDateTime(DateTime.parse(log['created_at'] as String))
           : '—';
       return PlutoRow(cells: {
         'time': PlutoCell(value: createdAt),

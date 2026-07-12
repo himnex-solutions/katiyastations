@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import '../../../../core/constants/app_colors.dart';
+import '../../../../core/widgets/app_snackbar.dart';
 import '../../../../core/widgets/confirm_dialog.dart';
 import '../../../../core/utils/responsive_utils.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
@@ -808,12 +809,7 @@ class _OrderScreenState extends ConsumerState<OrderScreen>
     final messenger = ScaffoldMessenger.of(context);
     if (isCurrentlyOnHold) {
       final ok = await ref.read(tableNotifierProvider.notifier).unholdSession(widget.sessionId);
-      if (ok && mounted) {
-        messenger.showSnackBar(const SnackBar(
-          content: Text('Order resumed!'),
-          backgroundColor: AppColors.success,
-        ));
-      }
+      if (ok && mounted) messenger.showSuccess('Order resumed!');
     } else {
       // Show reason dialog
       String? reason;
@@ -861,38 +857,16 @@ class _OrderScreenState extends ConsumerState<OrderScreen>
       final ok = await ref
           .read(tableNotifierProvider.notifier)
           .holdSession(widget.sessionId, reason: reason);
-      if (ok && mounted) {
-        messenger.showSnackBar(const SnackBar(
-          content: Text('Order placed on hold'),
-          backgroundColor: AppColors.warning,
-        ));
-      }
+      if (ok && mounted) messenger.showWarning('Order placed on hold');
     }
   }
 
   /// Explains why the bill can't be requested yet — shown on tap so the
   /// message reaches phone/tablet users, where a Tooltip (hover-only) never
-  /// appears. White-on-amber, matching the app's other warning snackbars.
+  /// appears.
   void _warnBillBlocked(String? reason) {
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(SnackBar(
-        backgroundColor: AppColors.warning,
-        behavior: SnackBarBehavior.floating,
-        duration: const Duration(seconds: 4),
-        content: Row(children: [
-          const Icon(Icons.info_outline_rounded, color: Colors.white, size: 18),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              reason ??
-                  'The kitchen must serve every order before you can request the bill.',
-              style: GoogleFonts.outfit(
-                  color: Colors.white, fontWeight: FontWeight.w600),
-            ),
-          ),
-        ]),
-      ));
+    ScaffoldMessenger.of(context).showWarning(reason ??
+        'The kitchen must serve every order before you can request the bill.');
   }
 
   Future<void> _handleRequestBill() async {
@@ -905,32 +879,11 @@ class _OrderScreenState extends ConsumerState<OrderScreen>
     if (!mounted) return;
 
     if (error != null) {
-      messenger.showSnackBar(SnackBar(
-        content: Text(error),
-        duration: const Duration(seconds: 4),
-        backgroundColor: AppColors.error,
-      ));
+      messenger.showError(error);
       return;
     }
 
-    messenger.showSnackBar(
-      SnackBar(
-        content: Row(
-          children: [
-            const Icon(Icons.check_circle, color: AppColors.warning),
-            const SizedBox(width: 10),
-            // Explicit dark text: the background is a light grey, and the
-            // SnackBar theme's default content colour is white — which was
-            // leaving this message invisible.
-            Text('Bill request sent to cashier!',
-                style: GoogleFonts.outfit(
-                    color: AppColors.textPrimary,
-                    fontWeight: FontWeight.w600)),
-          ],
-        ),
-        backgroundColor: AppColors.surfaceVariant,
-      ),
-    );
+    messenger.showSuccess('Bill request sent to cashier!');
   }
 
   Future<void> _sendKot(dynamic profile) async {
@@ -943,25 +896,12 @@ class _OrderScreenState extends ConsumerState<OrderScreen>
             branchId: profile.branchId ?? '',
           );
       if (kot != null && mounted) {
-        messenger.showSnackBar(
-          SnackBar(
-            content: Row(
-              children: [
-                const Icon(Icons.check_circle, color: AppColors.success),
-                const SizedBox(width: 10),
-                Text('${kot.kotNumber} sent to kitchen!'),
-              ],
-            ),
-            backgroundColor: AppColors.surfaceVariant,
-          ),
-        );
+        messenger.showSuccess('${kot.kotNumber} sent to kitchen!');
         // Switch to KOT History tab so they can see/edit it
         _rightPanelTab.animateTo(1);
       }
     } catch (e) {
-      messenger.showSnackBar(
-        SnackBar(content: Text('Error sending KOT: $e'), backgroundColor: AppColors.error),
-      );
+      messenger.showError('Error sending KOT: $e');
     }
   }
 }
@@ -1225,7 +1165,7 @@ class _KotHistoryCardState extends ConsumerState<_KotHistoryCard> {
                   final isCancelled = item['status'] == 'cancelled';
                   final qty = (item['quantity'] as num).toInt();
                   final unitPrice = (item['unit_price'] as num?)?.toDouble() ?? 0.0;
-                  final itemName = item['menu_item_name'] as String? ?? 'Item';
+                  final itemName = kotItemNameOf(item) ?? 'Item';
                   final itemId = item['id'] as String;
 
                   return Padding(
@@ -1305,12 +1245,7 @@ class _KotHistoryCardState extends ConsumerState<_KotHistoryCard> {
     }
 
     final ok = await ref.read(tableNotifierProvider.notifier).updateKotItem(kotItemId, newQty);
-    if (!ok && mounted) {
-      messenger.showSnackBar(const SnackBar(
-        content: Text('Failed to update item'),
-        backgroundColor: AppColors.error,
-      ));
-    }
+    if (!ok && mounted) messenger.showError('Failed to update item');
   }
 }
 

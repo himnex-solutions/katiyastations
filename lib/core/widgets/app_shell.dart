@@ -327,6 +327,10 @@ class AppShell extends ConsumerWidget {
   }
 }
 
+const double _railExpandedWidth = 240;
+const double _railCollapsedWidth = 72;
+const double _railPadding = 12;
+
 class _SideNavRail extends StatefulWidget {
   final List<NavItem> navItems;
   final String currentPath;
@@ -350,9 +354,18 @@ class _SideNavRailState extends State<_SideNavRail> {
   String get _roleLabel => roleLabelFor(widget.profile?.role);
   Color get _roleColor => roleColorFor(widget.profile?.role);
 
+  Widget _avatar() => CircleAvatar(
+        radius: 18,
+        backgroundColor: _roleColor.withValues(alpha: 0.2),
+        child: Text(
+          widget.profile?.fullName?.substring(0, 1).toUpperCase() ?? 'U',
+          style: TextStyle(color: _roleColor, fontWeight: FontWeight.w700, fontSize: 14),
+        ),
+      );
+
   @override
   Widget build(BuildContext context) {
-    final w = _collapsed ? 72.0 : 240.0;
+    final w = _collapsed ? _railCollapsedWidth : _railExpandedWidth;
 
     return AnimatedContainer(
       duration: const Duration(milliseconds: 200),
@@ -366,26 +379,41 @@ class _SideNavRailState extends State<_SideNavRail> {
           // Header
           Container(
             height: 72,
-            padding: const EdgeInsets.symmetric(horizontal: 12),
+            padding: const EdgeInsets.symmetric(horizontal: _railPadding),
             decoration: const BoxDecoration(
               border: Border(bottom: BorderSide(color: AppColors.border)),
             ),
-            child: Row(
-              children: [
-                Container(
-                  width: 40,
-                  height: 40,
-                  decoration: const BoxDecoration(
-                    shape: BoxShape.circle,
-                  ),
-                  child: ClipOval(
-                    child: Image.asset(
-                      'assets/images/katiyastationlogo.jpeg',
-                      fit: BoxFit.cover,
+            child: _RailContent(
+              collapsed: _collapsed,
+              collapsedChild: Tooltip(
+                message: 'Expand menu',
+                child: InkWell(
+                  onTap: () => setState(() => _collapsed = false),
+                  customBorder: const CircleBorder(),
+                  child: SizedBox(
+                    width: 40,
+                    height: 40,
+                    child: ClipOval(
+                      child: Image.asset(
+                        'assets/images/katiyastationlogo.jpeg',
+                        fit: BoxFit.cover,
+                      ),
                     ),
                   ),
                 ),
-                if (!_collapsed) ...[
+              ),
+              child: Row(
+                children: [
+                  SizedBox(
+                    width: 40,
+                    height: 40,
+                    child: ClipOval(
+                      child: Image.asset(
+                        'assets/images/katiyastationlogo.jpeg',
+                        fit: BoxFit.cover,
+                      ),
+                    ),
+                  ),
                   const SizedBox(width: 10),
                   Expanded(
                     child: Column(
@@ -397,12 +425,13 @@ class _SideNavRailState extends State<_SideNavRail> {
                       ],
                     ),
                   ),
+                  IconButton(
+                    icon: const Icon(Icons.chevron_left, color: AppColors.textSecondary, size: 18),
+                    tooltip: 'Collapse menu',
+                    onPressed: () => setState(() => _collapsed = true),
+                  ),
                 ],
-                IconButton(
-                  icon: Icon(_collapsed ? Icons.chevron_right : Icons.chevron_left, color: AppColors.textSecondary, size: 18),
-                  onPressed: () => setState(() => _collapsed = !_collapsed),
-                ),
-              ],
+              ),
             ),
           ),
           // Nav Items
@@ -424,21 +453,24 @@ class _SideNavRailState extends State<_SideNavRail> {
           ),
           // User profile footer
           Container(
-            padding: const EdgeInsets.all(12),
+            height: 72,
+            padding: const EdgeInsets.all(_railPadding),
             decoration: const BoxDecoration(
               border: Border(top: BorderSide(color: AppColors.border)),
             ),
-            child: Row(
-              children: [
-                CircleAvatar(
-                  radius: 18,
-                  backgroundColor: _roleColor.withValues(alpha: 0.2),
-                  child: Text(
-                    widget.profile?.fullName?.substring(0, 1).toUpperCase() ?? 'U',
-                    style: TextStyle(color: _roleColor, fontWeight: FontWeight.w700, fontSize: 14),
-                  ),
+            child: _RailContent(
+              collapsed: _collapsed,
+              collapsedChild: Tooltip(
+                message: '$_roleLabel — Sign Out',
+                child: InkWell(
+                  onTap: widget.onSignOut,
+                  customBorder: const CircleBorder(),
+                  child: _avatar(),
                 ),
-                if (!_collapsed) ...[
+              ),
+              child: Row(
+                children: [
+                  _avatar(),
                   const SizedBox(width: 10),
                   Expanded(
                     child: Column(
@@ -459,10 +491,40 @@ class _SideNavRailState extends State<_SideNavRail> {
                     tooltip: 'Sign Out',
                   ),
                 ],
-              ],
+              ),
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// Lays the rail's header/footer content out at the width its state will settle
+/// at, and clips it. The rail's width is animated, so laying content out against
+/// the live width overflows on the frames where the two disagree — and the
+/// expanded content never fits the 48px the collapsed rail leaves anyway.
+class _RailContent extends StatelessWidget {
+  final bool collapsed;
+  final Widget collapsedChild;
+  final Widget child;
+
+  const _RailContent({
+    required this.collapsed,
+    required this.collapsedChild,
+    required this.child,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final width = (collapsed ? _railCollapsedWidth : _railExpandedWidth) - _railPadding * 2;
+
+    return ClipRect(
+      child: OverflowBox(
+        alignment: Alignment.centerLeft,
+        minWidth: width,
+        maxWidth: width,
+        child: collapsed ? Center(child: collapsedChild) : child,
       ),
     );
   }

@@ -68,6 +68,22 @@ class Kot extends Equatable {
   List<Object?> get props => [id, kotNumber, status, sessionId];
 }
 
+/// The dish name on a KOT line.
+///
+/// `kot_items` stores it as `name` — there is no `menu_item_name` column, so a
+/// screen that reaches for that key alone shows every line as "Item". The other
+/// keys are here for the bill/receipt payloads, which carry the same dish under
+/// `menu_item_name`.
+String? kotItemNameOf(Map<String, dynamic> json) {
+  for (final key in const ['name', 'menu_item_name', 'menuItemName']) {
+    final value = json[key];
+    if (value is String && value.isNotEmpty) return value;
+  }
+  final nested = json['menu_item'];
+  if (nested is Map && nested['name'] is String) return nested['name'] as String;
+  return null;
+}
+
 class KotItem extends Equatable {
   final String id;
   final String kotId;
@@ -94,7 +110,7 @@ class KotItem extends Equatable {
       id: json['id'] as String,
       kotId: json['kot_id'] as String,
       menuItemId: json['menu_item_id'] as String,
-      menuItemName: json['name'] as String? ?? json['menu_item_name'] as String? ?? json['menu_item']?['name'] ?? '',
+      menuItemName: kotItemNameOf(json) ?? '',
       quantity: json['quantity'] as int,
       unitPrice: (json['unit_price'] as num?)?.toDouble() ?? 0.0,
       notes: json['note'] as String? ?? json['notes'] as String?,

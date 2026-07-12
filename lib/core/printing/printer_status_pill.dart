@@ -9,9 +9,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:intl/intl.dart';
 
 import '../constants/app_colors.dart';
+import '../utils/date_time_utils.dart';
 import '../../features/branches/presentation/providers/branch_provider.dart';
 import 'printer_config.dart';
 import 'printer_status.dart';
@@ -191,7 +191,7 @@ class _PrinterStatusSheetState extends ConsumerState<_PrinterStatusSheet> {
     final color = printerStatusColor(probe.state);
     final checked = probe.state == PrinterLinkState.checking
         ? null
-        : DateFormat('hh:mm:ss a').format(probe.checkedAt);
+        : formatTimeWithSeconds(probe.checkedAt);
 
     return SafeArea(
       child: Padding(

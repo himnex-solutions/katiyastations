@@ -5,6 +5,7 @@ import 'package:flutter_animate/flutter_animate.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import '../../../../core/constants/app_colors.dart';
+import '../../../../core/utils/date_time_utils.dart';
 import '../../../../core/utils/responsive_utils.dart';
 import '../../../../core/constants/api_constants.dart';
 import '../../../../core/network/api_client.dart';
@@ -114,9 +115,7 @@ class _PurchaseScreenState extends ConsumerState<PurchaseScreen> {
                   itemCount: purchases.length,
                   itemBuilder: (ctx, i) {
                     final p = purchases[i];
-                    // Backend stores created_at in UTC (ISO ...Z); convert to
-                    // the device's local zone so the time reads correctly.
-                    final createdAt = DateTime.tryParse(p['created_at'] as String? ?? '')?.toLocal();
+                    final createdAt = DateTime.tryParse(p['created_at'] as String? ?? '');
                     return Container(
                       margin: const EdgeInsets.only(bottom: 10),
                       padding: const EdgeInsets.all(14),
@@ -136,9 +135,9 @@ class _PurchaseScreenState extends ConsumerState<PurchaseScreen> {
                         Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
                           Text('NPR ${fmt.format((p['total_amount'] as num?)?.toDouble() ?? 0)}', style: GoogleFonts.outfit(fontSize: 14, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
                           if (createdAt != null) ...[
-                            Text(DateFormat('dd MMM yyyy').format(createdAt),
+                            Text(formatDate(createdAt),
                                 style: GoogleFonts.outfit(fontSize: 11, color: AppColors.textSecondary)),
-                            Text(DateFormat('hh:mm a').format(createdAt),
+                            Text(formatTime(createdAt),
                                 style: GoogleFonts.outfit(fontSize: 10, color: AppColors.textHint)),
                           ],
                         ]),

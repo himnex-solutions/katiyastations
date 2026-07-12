@@ -6,6 +6,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:skeletonizer/skeletonizer.dart';
 import '../../../../core/constants/app_colors.dart';
+import '../../../../core/utils/date_time_utils.dart';
 import '../../../../core/widgets/confirm_dialog.dart';
 import '../../../../core/constants/api_constants.dart';
 import '../../../../core/network/api_client.dart';
@@ -347,8 +348,8 @@ class _StaffScreenState extends ConsumerState<StaffScreen> with SingleTickerProv
                                           style: GoogleFonts.outfit(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
                                       const SizedBox(height: 2),
                                       Text(
-                                        'In: ${DateFormat('hh:mm a').format(clockIn)}'
-                                        '${clockOut != null ? '  •  Out: ${DateFormat('hh:mm a').format(clockOut)}' : ''}',
+                                        'In: ${formatTime(clockIn)}'
+                                        '${clockOut != null ? '  •  Out: ${formatTime(clockOut)}' : ''}',
                                         style: GoogleFonts.outfit(fontSize: 12, color: AppColors.textSecondary),
                                       ),
                                     ],

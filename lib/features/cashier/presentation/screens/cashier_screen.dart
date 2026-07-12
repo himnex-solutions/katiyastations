@@ -8,6 +8,7 @@ import '../../../../core/constants/api_constants.dart';
 import '../../../../core/network/api_client.dart';
 import '../../../../core/printing/print_actions.dart';
 import '../../../../core/printing/printer_status_pill.dart';
+import '../../../../core/utils/date_time_utils.dart';
 import '../../../../core/utils/responsive_utils.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
 import 'package:flutter_animate/flutter_animate.dart';
@@ -293,7 +294,7 @@ class _CashierScreenState extends ConsumerState<CashierScreen>
                       fontSize: 18,
                       color: AppColors.textPrimary)),
               Text(
-                DateFormat('EEEE, dd MMM yyyy · HH:mm').format(DateTime.now()),
+                formatDayDateTime(DateTime.now()),
                 style: GoogleFonts.outfit(
                     fontSize: 11.5,
                     color: AppColors.textSecondary,
@@ -2520,7 +2521,7 @@ class _CashierScreenState extends ConsumerState<CashierScreen>
   void _printBill(double total, List items, Map<String, dynamic> data) {
     final subtotal = data['subtotal'] as double;
     final serviceCharge = _applyServiceCharge ? subtotal * 0.1 : 0.0;
-    final dateStr = DateFormat('yyyy-MM-dd HH:mm').format(DateTime.now());
+    final dateStr = formatDateTime(DateTime.now());
 
     final tables = ref.read(tablesStreamProvider).value ?? [];
     final selectedTable =
@@ -2603,7 +2604,7 @@ class _CashierScreenState extends ConsumerState<CashierScreen>
   // ─────────────────────────────────────────────────────────
   void _printReceipt(Map<String, dynamic> bill, List items) {
     final branch = ref.read(currentBranchProvider).value;
-    final dateStr = DateFormat('yyyy-MM-dd HH:mm').format(
+    final dateStr = formatDateTime(
         DateTime.tryParse(bill['created_at'] as String? ?? '') ??
             DateTime.now());
 

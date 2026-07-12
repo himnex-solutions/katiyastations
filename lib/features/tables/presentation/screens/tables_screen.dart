@@ -5,6 +5,8 @@ import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import '../../../../core/constants/app_colors.dart';
+import '../../../../core/utils/date_time_utils.dart';
+import '../../../../core/widgets/app_snackbar.dart';
 import '../../../../core/widgets/confirm_dialog.dart';
 import '../../../../core/utils/responsive_utils.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
@@ -126,11 +128,8 @@ class _TablesScreenState extends ConsumerState<TablesScreen>
   // ────────────────────────────────────────────────────────────────────────
   void _handleTableTap(BuildContext context, RestaurantTable table) async {
     if (table.isDisabled) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-            content: Text('This table is currently disabled.'),
-            backgroundColor: AppColors.textSecondary),
-      );
+      ScaffoldMessenger.of(context)
+          .showInfo('This table is currently disabled.');
       return;
     }
 
@@ -143,11 +142,8 @@ class _TablesScreenState extends ConsumerState<TablesScreen>
         _showSessionActionsDialog(context, table, session);
       }
     } else if (table.isReserved) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-            content: Text('Table is reserved. Convert from Reservations tab.'),
-            backgroundColor: AppColors.tableReserved),
-      );
+      ScaffoldMessenger.of(context)
+          .showWarning('Table is reserved. Convert from Reservations tab.');
     } else {
       // Any remaining status carries no live session — 'cleaning', say, which
       // a manager can still set by hand. These used to fall off the end of the
@@ -318,10 +314,12 @@ class _TablesScreenState extends ConsumerState<TablesScreen>
                       Navigator.pop(ctx);
                       final ok = await ref.read(tableNotifierProvider.notifier).unholdSession(session.id);
                       if (context.mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                          content: Text(ok ? 'Order resumed!' : 'Failed to resume order'),
-                          backgroundColor: ok ? AppColors.success : AppColors.error,
-                        ));
+                        final messenger = ScaffoldMessenger.of(context);
+                        if (ok) {
+                          messenger.showSuccess('Order resumed!');
+                        } else {
+                          messenger.showError('Failed to resume order');
+                        }
                       }
                     },
                   )
@@ -378,10 +376,12 @@ class _TablesScreenState extends ConsumerState<TablesScreen>
                           .read(tableNotifierProvider.notifier)
                           .holdSession(session.id, reason: reason);
                       if (context.mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                          content: Text(ok ? 'Order placed on hold' : 'Failed to place order on hold'),
-                          backgroundColor: ok ? AppColors.warning : AppColors.error,
-                        ));
+                        final messenger = ScaffoldMessenger.of(context);
+                        if (ok) {
+                          messenger.showWarning('Order placed on hold');
+                        } else {
+                          messenger.showError('Failed to place order on hold');
+                        }
                       }
                     },
                   ),
@@ -404,13 +404,12 @@ class _TablesScreenState extends ConsumerState<TablesScreen>
                           .read(tableNotifierProvider.notifier)
                           .requestBill(table.id, session.id);
                       if (context.mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                            content: Text(error ?? 'Bill requested!'),
-                            duration:
-                                Duration(seconds: error == null ? 2 : 4),
-                            backgroundColor: error == null
-                                ? AppColors.warning
-                                : AppColors.error));
+                        final messenger = ScaffoldMessenger.of(context);
+                        if (error == null) {
+                          messenger.showSuccess('Bill requested!');
+                        } else {
+                          messenger.showError(error);
+                        }
                       }
                     },
                   );
@@ -494,9 +493,8 @@ class _TablesScreenState extends ConsumerState<TablesScreen>
         [];
 
     if (availableTables.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('No available tables to transfer to.'),
-          backgroundColor: AppColors.error));
+      ScaffoldMessenger.of(context)
+          .showWarning('No available tables to transfer to.');
       return;
     }
 
@@ -584,12 +582,12 @@ class _TablesScreenState extends ConsumerState<TablesScreen>
                             sessionId: session.id,
                           );
                       if (context.mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                            content: Text(ok
-                                ? 'Session transferred!'
-                                : 'Transfer failed'),
-                            backgroundColor:
-                                ok ? AppColors.success : AppColors.error));
+                        final messenger = ScaffoldMessenger.of(context);
+                        if (ok) {
+                          messenger.showSuccess('Session transferred!');
+                        } else {
+                          messenger.showError('Transfer failed');
+                        }
                       }
                     },
               style: ElevatedButton.styleFrom(
@@ -612,9 +610,8 @@ class _TablesScreenState extends ConsumerState<TablesScreen>
         [];
 
     if (occupiedTables.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('No active tables to merge into.'),
-          backgroundColor: AppColors.error));
+      ScaffoldMessenger.of(context)
+          .showWarning('No active tables to merge into.');
       return;
     }
 
@@ -680,9 +677,8 @@ class _TablesScreenState extends ConsumerState<TablesScreen>
                       final targetSessionId = targetTable.currentSessionId;
                       if (targetSessionId == null) {
                         if (context.mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                              content: Text('Target table has no active session.'),
-                              backgroundColor: AppColors.error));
+                          ScaffoldMessenger.of(context)
+                              .showError('Target table has no active session.');
                         }
                         return;
                       }
@@ -697,9 +693,12 @@ class _TablesScreenState extends ConsumerState<TablesScreen>
                           );
 
                       if (context.mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                            content: Text(ok ? 'Tables merged successfully!' : 'Merge failed'),
-                            backgroundColor: ok ? AppColors.success : AppColors.error));
+                        final messenger = ScaffoldMessenger.of(context);
+                        if (ok) {
+                          messenger.showSuccess('Tables merged successfully!');
+                        } else {
+                          messenger.showError('Merge failed');
+                        }
                       }
                     },
               style: ElevatedButton.styleFrom(
@@ -722,9 +721,8 @@ class _TablesScreenState extends ConsumerState<TablesScreen>
         [];
 
     if (availableTables.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('No available tables to split into.'),
-          backgroundColor: AppColors.error));
+      ScaffoldMessenger.of(context)
+          .showWarning('No available tables to split into.');
       return;
     }
 
@@ -856,10 +854,12 @@ class _TablesScreenState extends ConsumerState<TablesScreen>
                     guestCount: newGuestCount,
                   );
               if (context.mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                  content: Text(ok ? 'Session split successfully!' : 'Split failed'),
-                  backgroundColor: ok ? AppColors.success : AppColors.error,
-                ));
+                final messenger = ScaffoldMessenger.of(context);
+                if (ok) {
+                  messenger.showSuccess('Session split successfully!');
+                } else {
+                  messenger.showError('Split failed');
+                }
               }
             },
             style: ElevatedButton.styleFrom(
@@ -890,11 +890,12 @@ class _TablesScreenState extends ConsumerState<TablesScreen>
         .read(tableNotifierProvider.notifier)
         .closeSession(table.id, session.id);
     if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(error ?? 'Table freed!'),
-          duration: Duration(seconds: error == null ? 2 : 4),
-          backgroundColor:
-              error == null ? AppColors.success : AppColors.error));
+      final messenger = ScaffoldMessenger.of(context);
+      if (error == null) {
+        messenger.showSuccess('Table freed!');
+      } else {
+        messenger.showError(error);
+      }
     }
   }
 
@@ -960,9 +961,8 @@ class _TablesScreenState extends ConsumerState<TablesScreen>
                       .read(tableNotifierProvider.notifier)
                       .setTableEnabled(table.id, false);
                   if (!ok && context.mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                        content: Text('Failed to disable table.'),
-                        backgroundColor: AppColors.error));
+                    ScaffoldMessenger.of(context)
+          .showError('Failed to disable table.');
                   }
                 },
               ),
@@ -977,9 +977,8 @@ class _TablesScreenState extends ConsumerState<TablesScreen>
                       .read(tableNotifierProvider.notifier)
                       .setTableEnabled(table.id, true);
                   if (!ok && context.mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                        content: Text('Failed to enable table.'),
-                        backgroundColor: AppColors.error));
+                    ScaffoldMessenger.of(context)
+          .showError('Failed to enable table.');
                   }
                 },
               ),
@@ -1093,9 +1092,8 @@ class _TablesScreenState extends ConsumerState<TablesScreen>
               if (ctx.mounted) {
                 Navigator.pop(ctx);
                 if (!ok && context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                      content: Text('Failed to add table'),
-                      backgroundColor: AppColors.error));
+                  ScaffoldMessenger.of(context)
+          .showError('Failed to add table');
                 }
               }
             },
@@ -1191,9 +1189,8 @@ class _TablesScreenState extends ConsumerState<TablesScreen>
                   );
               if (ctx.mounted) Navigator.pop(ctx);
               if (!ok && context.mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                    content: Text('Failed to update table'),
-                    backgroundColor: AppColors.error));
+                ScaffoldMessenger.of(context)
+          .showError('Failed to update table');
               }
             },
             child: const Text('Save Changes'),
@@ -1216,10 +1213,8 @@ class _TablesScreenState extends ConsumerState<TablesScreen>
     final ok =
         await ref.read(tableNotifierProvider.notifier).deleteTable(table.id);
     if (!ok && context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content:
-              Text('Failed to delete table. Make sure it is not occupied.'),
-          backgroundColor: AppColors.error));
+      ScaffoldMessenger.of(context)
+          .showError('Failed to delete table. Make sure it is not occupied.');
     }
   }
 }
@@ -1500,9 +1495,8 @@ class _ReservationsTabState extends ConsumerState<_ReservationsTab> {
         [];
 
     if (availableTables.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('No available tables to seat the guest.'),
-          backgroundColor: AppColors.error));
+      ScaffoldMessenger.of(context)
+          .showError('No available tables to seat the guest.');
       return;
     }
 
@@ -1751,9 +1745,8 @@ class _ReservationsTabState extends ConsumerState<_ReservationsTab> {
                     );
                 if (ctx.mounted) Navigator.pop(ctx);
                 if (!ok && context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                      content: Text('Failed to save reservation'),
-                      backgroundColor: AppColors.error));
+                  ScaffoldMessenger.of(context)
+          .showError('Failed to save reservation');
                 }
               },
               child: const Text('Book Table'),
@@ -1773,9 +1766,11 @@ class _ReservationsTabState extends ConsumerState<_ReservationsTab> {
     final notesCtrl =
         TextEditingController(text: reservation.notes ?? '');
     int guestCount = reservation.guestCount;
-    DateTime selectedDate = reservation.reservationTime;
-    TimeOfDay selectedTime =
-        TimeOfDay.fromDateTime(reservation.reservationTime);
+    // The booking is stored as a UTC instant; the pickers work in the Nepal
+    // wall-clock the staff booked it in.
+    final bookedAt = toNepalTime(reservation.reservationTime);
+    DateTime selectedDate = bookedAt;
+    TimeOfDay selectedTime = TimeOfDay.fromDateTime(bookedAt);
 
     showDialog(
       context: context,
@@ -2240,11 +2235,11 @@ class _ReservationCard extends StatelessWidget {
               children: [
                 _InfoChip(
                     Icons.schedule_rounded,
-                    DateFormat('hh:mm a').format(reservation.reservationTime),
+                    formatTime(reservation.reservationTime),
                     isPast ? AppColors.error : AppColors.textSecondary),
                 _InfoChip(
                     Icons.calendar_month_rounded,
-                    DateFormat('MMM d').format(reservation.reservationTime),
+                    formatShortDate(reservation.reservationTime),
                     AppColors.textSecondary),
                 _InfoChip(Icons.people_outline_rounded,
                     '${reservation.guestCount} guests', AppColors.textSecondary),
