@@ -4,6 +4,7 @@
   "buildCommand": "flutter/bin/flutter config --enable-web && flutter/bin/flutter pub get && flutter/bin/flutter build web --release --dart-define=FCM_VAPID_KEY=$FCM_VAPID_KEY",
   "outputDirectory": "build/web",
   "rewrites": [
+    { "source": "/privacy-policy", "destination": "/privacy-policy.html" },
     { "source": "/(.*)", "destination": "/index.html" }
   ]
 }
