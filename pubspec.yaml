@@ -24,7 +24,7 @@ dependencies:
   dio: ^5.7.0
   pretty_dio_logger: ^1.4.0
 
-  # WebSocket / Realtime (replaces Supabase Realtime)
+  # WebSocket / Realtime 
   socket_io_client: ^3.0.1
 
   # Firebase (FCM Push Notifications)

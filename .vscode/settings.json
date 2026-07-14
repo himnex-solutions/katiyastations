@@ -1,3 +1,4 @@
 {
-    "cmake.sourceDirectory": "D:/Dream project/Katiya Station/katiya_station_rms/windows"
+    "cmake.sourceDirectory": "D:/Dream project/Katiya Station/katiya_station_rms/windows",
+    "java.configuration.updateBuildConfiguration": "interactive"
 }
