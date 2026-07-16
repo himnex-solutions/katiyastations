@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_animate/flutter_animate.dart' hide ShimmerEffect;
@@ -425,19 +427,6 @@ class _KotCard extends ConsumerWidget {
     required this.ref,
   });
 
-  String _elapsedLabel() {
-    final mins = kot.elapsed.inMinutes;
-    if (mins < 1) return 'Just now';
-    return '${mins}m ago';
-  }
-
-  Color _elapsedColor() {
-    final mins = kot.elapsed.inMinutes;
-    if (mins < 10) return AppColors.success;
-    if (mins < 20) return AppColors.warning;
-    return AppColors.error;
-  }
-
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final itemsAsync = ref.watch(kotItemsProvider(kot.id));
@@ -507,17 +496,7 @@ class _KotCard extends ConsumerWidget {
                               color: AppColors.textSecondary)),
                     ),
                     const SizedBox(width: 6),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                      decoration: BoxDecoration(
-                        color: _elapsedColor().withValues(alpha: 0.15),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Text(_elapsedLabel(),
-                          maxLines: 1,
-                          style: GoogleFonts.outfit(
-                              fontSize: 10, color: _elapsedColor(), fontWeight: FontWeight.w600)),
-                    ),
+                    _ElapsedChip(kot: kot),
                     const SizedBox(width: 8),
                   ],
                 ),
@@ -736,6 +715,73 @@ class _KotCard extends ConsumerWidget {
               style: receiptStyle(fontSize: 12, weight: FontWeight.bold)),
         ],
       ),
+    );
+  }
+}
+
+/// Live "time since the KOT arrived" chip. The kitchen KOT list only rebuilds
+/// on socket/status changes, so this widget carries its own one-second ticker
+/// to keep the elapsed time current. It's isolated from [_KotCard] on purpose:
+/// only this small chip repaints each second, not the whole card (which would
+/// also re-run its entry animation).
+class _ElapsedChip extends StatefulWidget {
+  final Kot kot;
+
+  const _ElapsedChip({required this.kot});
+
+  @override
+  State<_ElapsedChip> createState() => _ElapsedChipState();
+}
+
+class _ElapsedChipState extends State<_ElapsedChip> {
+  Timer? _timer;
+
+  @override
+  void initState() {
+    super.initState();
+    _timer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) setState(() {});
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  // Rolls up through seconds → minutes → hours so a long-standing KOT reads
+  // "2h 35m ago" instead of "155m ago".
+  String _label(Duration d) {
+    final seconds = d.inSeconds < 0 ? 0 : d.inSeconds;
+    if (seconds < 60) return '${seconds}s ago';
+    if (d.inMinutes < 60) return '${d.inMinutes}m ago';
+    final hours = d.inHours;
+    final mins = d.inMinutes % 60;
+    return mins == 0 ? '${hours}h ago' : '${hours}h ${mins}m ago';
+  }
+
+  Color _color(Duration d) {
+    final mins = d.inMinutes;
+    if (mins < 10) return AppColors.success;
+    if (mins < 20) return AppColors.warning;
+    return AppColors.error;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final elapsed = widget.kot.elapsed;
+    final color = _color(elapsed);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.15),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Text(_label(elapsed),
+          maxLines: 1,
+          style: GoogleFonts.outfit(
+              fontSize: 10, color: color, fontWeight: FontWeight.w600)),
     );
   }
 }
