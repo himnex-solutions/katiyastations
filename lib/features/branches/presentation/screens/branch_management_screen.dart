@@ -56,7 +56,7 @@ class BranchManagementScreen extends ConsumerWidget {
           ],
         ),
         actions: [
-          if (profile?.isSuperAdmin == true || profile?.isBranchManager == true)
+          if (profile?.isSuperAdmin == true)
             TextButton.icon(
               icon: const Icon(Icons.add_rounded, size: 18),
               label: const Text('Add Branch'),
@@ -96,7 +96,7 @@ class BranchManagementScreen extends ConsumerWidget {
             itemCount: branches.length,
             itemBuilder: (ctx, i) => _BranchCard(
               branch: branches[i],
-              canEdit: profile?.isSuperAdmin == true || profile?.isBranchManager == true,
+              canEdit: profile?.isSuperAdmin == true,
               onEdit: () => _showBranchDialog(context, ref, branches[i]),
               onDelete: () => _deleteBranch(context, ref, branches[i]['id'] as String),
               onToggle: () => _toggleActive(ref, branches[i]),

@@ -106,8 +106,10 @@ const List<NavItem> allNavItems = [
       allowedRoles: ['branch_manager', 'cashier']),
   NavItem(label: 'Suppliers', icon: Icons.local_shipping, activeIcon: Icons.local_shipping, path: '/suppliers',
       allowedRoles: ['branch_manager', 'inventory']),
+  // Branch creation/management is a super-admin-only concern — managers run a
+  // branch, they don't add or remove them.
   NavItem(label: 'Branches', icon: Icons.store, activeIcon: Icons.store, path: '/branches',
-      allowedRoles: ['super_admin', 'branch_manager']),
+      allowedRoles: ['super_admin']),
   NavItem(label: 'Shift Close', icon: Icons.lock, activeIcon: Icons.lock, path: '/shift-closing',
       allowedRoles: ['branch_manager', 'cashier']),
   NavItem(label: 'Audit Logs', icon: Icons.history, activeIcon: Icons.history, path: '/audit-logs',
@@ -194,6 +196,12 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         // redirect above, a deep-link, or a hard refresh — to their own screen.
         final home = landingPathForRole(role);
         if (state.matchedLocation == '/dashboard' && home != '/dashboard') {
+          return home;
+        }
+        // Branch management is super-admin only. It's no longer in a manager's
+        // nav, but a direct URL / hard refresh (esp. on web) could still land
+        // here — bounce any non-super-admin back to their home screen.
+        if (state.matchedLocation == '/branches' && role != 'super_admin') {
           return home;
         }
       }
