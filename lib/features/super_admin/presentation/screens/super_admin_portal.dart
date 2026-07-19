@@ -167,6 +167,7 @@ class _SuperAdminPortalState extends ConsumerState<SuperAdminPortal>
                         userId: filtered[i]['id'] as String,
                         userName: filtered[i]['full_name'] as String? ?? 'this user',
                       ),
+                      onDelete: () => _deleteUser(filtered[i]),
                     ).animate().fadeIn(delay: Duration(milliseconds: i * 40)),
                   ));
                 },
@@ -208,6 +209,37 @@ class _SuperAdminPortalState extends ConsumerState<SuperAdminPortal>
       messenger.showSnackBar(SnackBar(
         content: Text('$name has been ${isActive ? 'blocked' : 'unblocked'}.'),
         backgroundColor: isActive ? AppColors.error : AppColors.success,
+      ));
+    } catch (e) {
+      messenger.showSnackBar(
+          SnackBar(content: Text('Error: $e'), backgroundColor: AppColors.error));
+    }
+  }
+
+  Future<void> _deleteUser(Map<String, dynamic> user) async {
+    final name = user['full_name'] as String? ?? 'this user';
+
+    // Capture messenger before the async gap
+    final messenger = ScaffoldMessenger.of(context);
+
+    final confirmed = await showConfirmDialog(
+      context,
+      title: 'Delete User',
+      message:
+          'Permanently delete the account for "$name"? They will lose access '
+          'immediately. Past bills, orders and reports they were involved in are '
+          'kept. This cannot be undone.',
+      confirmLabel: 'Delete',
+      confirmColor: AppColors.error,
+      icon: Icons.delete_outline_rounded,
+    );
+    if (!confirmed) return;
+    try {
+      await ApiClient.instance.delete(ApiConstants.userById(user['id'] as String));
+      ref.invalidate(allUsersProvider);
+      messenger.showSnackBar(SnackBar(
+        content: Text('$name has been deleted.'),
+        backgroundColor: AppColors.success,
       ));
     } catch (e) {
       messenger.showSnackBar(
@@ -453,12 +485,14 @@ class _UserCard extends StatelessWidget {
   final VoidCallback onBlock;
   final VoidCallback onEdit;
   final VoidCallback onResetPassword;
+  final VoidCallback onDelete;
 
   const _UserCard({
     required this.user,
     required this.onBlock,
     required this.onEdit,
     required this.onResetPassword,
+    required this.onDelete,
   });
 
   static const _roleColors = {
@@ -575,6 +609,7 @@ class _UserCard extends StatelessWidget {
             if (s == 'edit') onEdit();
             if (s == 'block') onBlock();
             if (s == 'reset_password') onResetPassword();
+            if (s == 'delete') onDelete();
           },
           itemBuilder: (_) => [
             const PopupMenuItem(
@@ -602,6 +637,14 @@ class _UserCard extends StatelessWidget {
                 Text(isActive ? 'Block Login' : 'Restore Access',
                     style: TextStyle(
                         color: isActive ? AppColors.error : AppColors.success)),
+              ]),
+            ),
+            const PopupMenuItem(
+              value: 'delete',
+              child: Row(children: [
+                Icon(Icons.delete_outline_rounded, size: 16, color: AppColors.error),
+                SizedBox(width: 8),
+                Text('Delete User', style: TextStyle(color: AppColors.error)),
               ]),
             ),
           ],
