@@ -10,6 +10,7 @@ import '../../../../core/constants/app_colors.dart';
 import '../../../../core/constants/api_constants.dart';
 import '../../../../core/network/api_client.dart';
 import '../../../../core/utils/responsive_utils.dart';
+import '../../../../core/utils/image_url.dart';
 import '../../../../core/widgets/confirm_dialog.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
 import '../../../menu/domain/entities/menu_entities.dart';
@@ -1406,8 +1407,9 @@ class _MenuItemCard extends StatelessWidget {
                 aspectRatio: 1.5,
                 child: hasImage
                     ? Image.network(
-                        item.imageUrl!,
+                        menuImageUrl(item.imageUrl!, width: 500),
                         fit: BoxFit.cover,
+                        cacheWidth: 500,
                         loadingBuilder: (ctx, child, progress) {
                           if (progress == null) return child;
                           return Container(

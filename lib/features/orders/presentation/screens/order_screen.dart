@@ -8,6 +8,7 @@ import '../../../../core/constants/app_colors.dart';
 import '../../../../core/widgets/app_snackbar.dart';
 import '../../../../core/widgets/confirm_dialog.dart';
 import '../../../../core/utils/responsive_utils.dart';
+import '../../../../core/utils/image_url.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
 import '../providers/order_provider.dart';
 import '../../domain/entities/order_entities.dart';
@@ -1433,8 +1434,9 @@ class _MenuItemCardTile extends StatelessWidget {
                 children: [
                   hasImage
                       ? Image.network(
-                          item.imageUrl!,
+                          menuImageUrl(item.imageUrl!, width: 400),
                           fit: BoxFit.cover,
+                          cacheWidth: 400,
                           loadingBuilder: (ctx, child, progress) {
                             if (progress == null) return child;
                             return const _ImageLoadingPlaceholder();
