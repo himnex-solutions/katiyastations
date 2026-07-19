@@ -25,6 +25,7 @@ export const SocketEvents = {
   orderItemCancelled: 'order:item_cancelled',
   billGenerated: 'bill:generated',
   billPaid: 'bill:paid',
+  billRefunded: 'bill:refunded',
   inventoryLowStock: 'inventory:low_stock',
   notificationNew: 'notification:new',
   shiftClosed: 'shift:closed',

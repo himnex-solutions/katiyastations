@@ -11,6 +11,23 @@ export class CreateShiftClosingDto {
   @IsString()
   date: string;
 
+  // Human-observed inputs — the only figures the cashier actually supplies.
+  // Everything below (cashTotal … billCount) is recomputed server-side and
+  // kept optional purely for backward compatibility with older clients.
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  openingFloat?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  countedCash?: number;
+
+  @IsOptional()
+  @IsString()
+  notes?: string;
+
   @IsOptional()
   @IsNumber()
   @Min(0)

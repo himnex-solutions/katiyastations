@@ -88,6 +88,7 @@ class ApiConstants {
   static const String bills = '/billing/bills';
   static String billById(String id) => '/billing/bills/$id';
   static String generateBill(String sessionId) => '/billing/sessions/$sessionId/generate';
+  static String refundBill(String id) => '/billing/bills/$id/refund';
   static const String paymentHistory = '/billing/payment-history';
 
   // ── Credit (Udhaaro) Endpoints ─────────────────────────────

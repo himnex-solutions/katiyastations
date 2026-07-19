@@ -40,8 +40,16 @@ export class ShiftClosingService {
   /** Aggregates today's bills into the cashier's end-of-day summary. */
   async todaySummary(currentUser: CurrentUserPayload, requestedBranchId?: string) {
     const branchId = resolveBranchScope(currentUser, requestedBranchId);
-    const now = new Date();
-    const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    return this.summaryForDay(branchId, new Date());
+  }
+
+  /**
+   * Server-side truth for a single day's takings, keyed by payment method.
+   * A reversed bill (refunded or voided) counts only as a refund and is kept
+   * out of revenue and its method bucket, so `cash` is the net cash owed.
+   */
+  private async summaryForDay(branchId: string | undefined, day: Date) {
+    const startOfDay = new Date(day.getFullYear(), day.getMonth(), day.getDate());
     const endOfDay = new Date(startOfDay.getTime() + 24 * 60 * 60 * 1000);
 
     const bills = await this.prisma.bill.findMany({
@@ -70,7 +78,7 @@ export class ShiftClosingService {
     for (const bill of bills) {
       const amount = Number(bill.totalAmount);
 
-      if (bill.paymentStatus === 'refunded') {
+      if (bill.paymentStatus === 'refunded' || bill.paymentStatus === 'voided') {
         summary.refund += amount;
         continue;
       }
@@ -90,12 +98,54 @@ export class ShiftClosingService {
     return summary;
   }
 
-  create(currentUser: CurrentUserPayload, dto: CreateShiftClosingDto) {
+  /**
+   * Closes the day: the money figures come from the server (not the client)
+   * so they can't be fudged, while the cashier supplies only what a person can
+   * observe — the opening float and the cash physically counted in the drawer.
+   * Expected cash and the over/short variance are derived from those two.
+   * A day can only be closed once (a duplicate for the same date is rejected).
+   */
+  async create(currentUser: CurrentUserPayload, dto: CreateShiftClosingDto) {
+    const branchId = resolveBranchScope(currentUser, dto.branchId) ?? dto.branchId;
+
+    const existing = await this.prisma.shiftClosing.findFirst({
+      where: { branchId, date: dto.date, status: { not: 'rejected' } },
+    });
+    if (existing) {
+      throw new BadRequestException(`Day ${dto.date} has already been closed`);
+    }
+
+    const summary = await this.summaryForDay(branchId, new Date(dto.date));
+    const openingFloat = dto.openingFloat ?? 0;
+    const countedCash = dto.countedCash ?? 0;
+    const expectedCash = openingFloat + summary.cash;
+    const cashVariance = countedCash - expectedCash;
+
     return this.prisma.shiftClosing.create({
       data: {
-        ...dto,
+        branchId,
         cashierId: currentUser.userId,
         cashierName: dto.cashierName ?? currentUser.email,
+        date: dto.date,
+        openingFloat,
+        countedCash,
+        expectedCash,
+        cashVariance,
+        notes: dto.notes,
+        // Server-computed money — client-sent totals are ignored on purpose.
+        cashTotal: summary.cash,
+        cardTotal: summary.card,
+        esewaTotal: summary.esewa,
+        khaltiTotal: summary.khalti,
+        fonepayTotal: summary.fonepay,
+        creditTotal: summary.credit,
+        refundTotal: summary.refund,
+        totalRevenue: summary.totalRevenue,
+        netRevenue: summary.netRevenue,
+        totalVat: summary.totalVat,
+        totalDiscount: summary.totalDiscount,
+        totalServiceCharge: summary.totalServiceCharge,
+        billCount: summary.billCount,
       },
     });
   }

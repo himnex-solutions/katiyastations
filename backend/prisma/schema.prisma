@@ -30,18 +30,19 @@ model User {
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
 
-  branch              Branch?              @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  branch               Branch?              @relation(fields: [branchId], references: [id], onDelete: SetNull)
   refreshTokens        RefreshToken[]
-  deviceTokens          DeviceToken[]
-  passwordResetTokens   PasswordResetToken[]
-  waiterSessions        TableSession[]        @relation("SessionWaiter")
-  waiterKots            Kot[]                 @relation("KotWaiter")
-  preparedKots          Kot[]                 @relation("KotPreparedBy")
-  cashierBills          Bill[]                @relation("BillCashier")
-  receivedPayments      Payment[]             @relation("PaymentReceivedBy")
-  createdLoyaltyTxns    LoyaltyTransaction[]  @relation("LoyaltyCreatedBy")
-  auditLogs             AuditLog[]
-  cashierShiftClosings  ShiftClosing[]        @relation("ShiftCashier")
+  deviceTokens         DeviceToken[]
+  passwordResetTokens  PasswordResetToken[]
+  waiterSessions       TableSession[]       @relation("SessionWaiter")
+  waiterKots           Kot[]                @relation("KotWaiter")
+  preparedKots         Kot[]                @relation("KotPreparedBy")
+  cashierBills         Bill[]               @relation("BillCashier")
+  refundedBills        Bill[]               @relation("BillRefundedBy")
+  receivedPayments     Payment[]            @relation("PaymentReceivedBy")
+  createdLoyaltyTxns   LoyaltyTransaction[] @relation("LoyaltyCreatedBy")
+  auditLogs            AuditLog[]
+  cashierShiftClosings ShiftClosing[]       @relation("ShiftCashier")
 
   @@map("users")
 }
@@ -89,42 +90,42 @@ model PasswordResetToken {
 // ── 1. Branches ──────────────────────────────────────────────
 
 model Branch {
-  id                 String   @id @default(uuid())
-  name               String
-  city               String?
-  address            String?
-  phone              String?
-  email              String?
-  taxRegNumber       String?  @map("tax_reg_number")
-  vatRate            Decimal  @default(13.0) @map("vat_rate")
-  serviceChargeRate  Decimal  @default(10.0) @map("service_charge_rate")
-  isActive           Boolean  @default(true) @map("is_active")
-  createdAt          DateTime @default(now()) @map("created_at")
-  updatedAt          DateTime @updatedAt @map("updated_at")
+  id                String   @id @default(uuid())
+  name              String
+  city              String?
+  address           String?
+  phone             String?
+  email             String?
+  taxRegNumber      String?  @map("tax_reg_number")
+  vatRate           Decimal  @default(13.0) @map("vat_rate")
+  serviceChargeRate Decimal  @default(10.0) @map("service_charge_rate")
+  isActive          Boolean  @default(true) @map("is_active")
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
 
-  users             User[]
-  tables            RestaurantTable[]
-  sessions          TableSession[]
-  kots              Kot[]
-  menuCategories    MenuCategory[]
-  menuItems         MenuItem[]
-  bills             Bill[]
-  creditRecords     CreditRecord[]
-  inventoryItems    InventoryItem[]
-  barStock          BarStock[]
-  barTransactions   BarTransaction[]
-  suppliers         Supplier[]
-  purchases         Purchase[]
-  expenses          Expense[]
-  customers         Customer[]
-  reservations      Reservation[]
-  loyaltyTxns       LoyaltyTransaction[]
-  staffMembers      StaffMember[]
-  auditLogs         AuditLog[]
-  shiftClosings     ShiftClosing[]
-  recipes           Recipe[]
-  stockMovements    StockMovement[]
-  notifications     Notification[]
+  users           User[]
+  tables          RestaurantTable[]
+  sessions        TableSession[]
+  kots            Kot[]
+  menuCategories  MenuCategory[]
+  menuItems       MenuItem[]
+  bills           Bill[]
+  creditRecords   CreditRecord[]
+  inventoryItems  InventoryItem[]
+  barStock        BarStock[]
+  barTransactions BarTransaction[]
+  suppliers       Supplier[]
+  purchases       Purchase[]
+  expenses        Expense[]
+  customers       Customer[]
+  reservations    Reservation[]
+  loyaltyTxns     LoyaltyTransaction[]
+  staffMembers    StaffMember[]
+  auditLogs       AuditLog[]
+  shiftClosings   ShiftClosing[]
+  recipes         Recipe[]
+  stockMovements  StockMovement[]
+  notifications   Notification[]
 
   @@map("branches")
 }
@@ -132,19 +133,19 @@ model Branch {
 // ── 3. Restaurant Tables ────────────────────────────────────
 
 model RestaurantTable {
-  id                String    @id @default(uuid())
-  branchId          String    @map("branch_id")
-  tableNumber       String    @map("table_number")
-  section           String    @default("Main")
-  capacity          Int       @default(4)
-  status            String    @default("available") // available | occupied | reserved | cleaning | ready_for_billing | closed
-  currentSessionId  String?   @unique @map("current_session_id")
-  billRequested     Boolean   @default(false) @map("bill_requested")
-  billRequestedAt   DateTime? @map("bill_requested_at")
-  isEnabled         Boolean   @default(true) @map("is_enabled")
-  description       String?
-  createdAt         DateTime  @default(now()) @map("created_at")
-  updatedAt         DateTime  @updatedAt @map("updated_at")
+  id               String    @id @default(uuid())
+  branchId         String    @map("branch_id")
+  tableNumber      String    @map("table_number")
+  section          String    @default("Main")
+  capacity         Int       @default(4)
+  status           String    @default("available") // available | occupied | reserved | cleaning | ready_for_billing | closed
+  currentSessionId String?   @unique @map("current_session_id")
+  billRequested    Boolean   @default(false) @map("bill_requested")
+  billRequestedAt  DateTime? @map("bill_requested_at")
+  isEnabled        Boolean   @default(true) @map("is_enabled")
+  description      String?
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
 
   branch         Branch         @relation(fields: [branchId], references: [id], onDelete: Cascade)
   currentSession TableSession?  @relation("CurrentSession", fields: [currentSessionId], references: [id], onDelete: SetNull)
@@ -178,12 +179,12 @@ model TableSession {
   notes           String?
   createdAt       DateTime  @default(now()) @map("created_at")
 
-  table          RestaurantTable  @relation("TableSessions", fields: [tableId], references: [id], onDelete: Cascade)
+  table           RestaurantTable  @relation("TableSessions", fields: [tableId], references: [id], onDelete: Cascade)
   currentForTable RestaurantTable? @relation("CurrentSession")
-  branch         Branch           @relation(fields: [branchId], references: [id], onDelete: Cascade)
-  waiter         User?            @relation("SessionWaiter", fields: [waiterId], references: [id], onDelete: SetNull)
-  kots           Kot[]
-  bills          Bill[]
+  branch          Branch           @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  waiter          User?            @relation("SessionWaiter", fields: [waiterId], references: [id], onDelete: SetNull)
+  kots            Kot[]
+  bills           Bill[]
 
   @@map("table_sessions")
 }
@@ -257,22 +258,27 @@ model MenuCategory {
 // ── 7. Menu Items ────────────────────────────────────────────
 
 model MenuItem {
-  id          String   @id @default(uuid())
-  branchId    String   @map("branch_id")
-  categoryId  String   @map("category_id")
-  name        String
-  price       Decimal
-  costPrice   Decimal? @map("cost_price")
-  taxRate     Decimal  @default(0.13) @map("tax_rate")
-  description String?
-  imageUrl    String?  @map("image_url")
-  isAvailable Boolean  @default(true) @map("is_available")
-  type        String   @default("food") // food | drink | bar
-  createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @updatedAt @map("updated_at")
+  id             String   @id @default(uuid())
+  branchId       String   @map("branch_id")
+  categoryId     String   @map("category_id")
+  name           String
+  price          Decimal
+  costPrice      Decimal? @map("cost_price")
+  taxRate        Decimal  @default(0.13) @map("tax_rate")
+  description    String?
+  imageUrl       String?  @map("image_url")
+  isAvailable    Boolean  @default(true) @map("is_available")
+  type           String   @default("food") // food | drink | bar
+  // When set, selling this item auto-deducts pegsPerServing pegs from the
+  // linked BarStock bottle on KOT create (bar equivalent of a Recipe).
+  barStockId     String?  @map("bar_stock_id")
+  pegsPerServing Decimal? @map("pegs_per_serving")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
 
-  branch   Branch        @relation(fields: [branchId], references: [id], onDelete: Cascade)
-  category MenuCategory  @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  branch   Branch       @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  category MenuCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  barStock BarStock?    @relation(fields: [barStockId], references: [id], onDelete: SetNull)
   kotItems KotItem[]
   recipe   Recipe?
 
@@ -282,32 +288,38 @@ model MenuItem {
 // ── 9. Bills ─────────────────────────────────────────────────
 
 model Bill {
-  id             String   @id @default(uuid())
-  branchId       String   @map("branch_id")
-  sessionId      String?  @map("session_id")
-  tableId        String?  @map("table_id")
-  billNumber     String   @map("bill_number")
-  invoiceNumber  String?  @map("invoice_number")
-  subTotal       Decimal  @map("sub_total")
-  discount       Decimal  @default(0.0)
-  serviceCharge  Decimal  @default(0.0) @map("service_charge")
-  vatAmount      Decimal  @default(0.0) @map("vat_amount")
-  totalAmount    Decimal  @map("total_amount")
-  amountPaid     Decimal  @default(0.0) @map("amount_paid")
-  changeAmount   Decimal  @default(0.0) @map("change_amount")
-  paymentMethod  String   @default("cash") @map("payment_method")
-  paymentStatus  String   @default("paid") @map("payment_status")
-  cashierId      String?  @map("cashier_id")
-  cashierName    String?  @map("cashier_name")
-  customerName   String?  @map("customer_name")
-  customerPhone  String?  @map("customer_phone")
-  createdAt      DateTime @default(now()) @map("created_at")
-  updatedAt      DateTime @updatedAt @map("updated_at")
+  id             String    @id @default(uuid())
+  branchId       String    @map("branch_id")
+  sessionId      String?   @map("session_id")
+  tableId        String?   @map("table_id")
+  billNumber     String    @map("bill_number")
+  invoiceNumber  String?   @map("invoice_number")
+  subTotal       Decimal   @map("sub_total")
+  discount       Decimal   @default(0.0)
+  serviceCharge  Decimal   @default(0.0) @map("service_charge")
+  vatAmount      Decimal   @default(0.0) @map("vat_amount")
+  totalAmount    Decimal   @map("total_amount")
+  amountPaid     Decimal   @default(0.0) @map("amount_paid")
+  changeAmount   Decimal   @default(0.0) @map("change_amount")
+  paymentMethod  String    @default("cash") @map("payment_method")
+  paymentStatus  String    @default("paid") @map("payment_status") // paid | partial_paid | credit | refunded | voided
+  cashierId      String?   @map("cashier_id")
+  cashierName    String?   @map("cashier_name")
+  customerName   String?   @map("customer_name")
+  customerPhone  String?   @map("customer_phone")
+  refundType     String?   @map("refund_type") // void | refund (set when paymentStatus is refunded/voided)
+  refundReason   String?   @map("refund_reason")
+  refundedById   String?   @map("refunded_by_id")
+  refundedByName String?   @map("refunded_by_name")
+  refundedAt     DateTime? @map("refunded_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
 
-  branch  Branch          @relation(fields: [branchId], references: [id], onDelete: Cascade)
-  session TableSession?   @relation(fields: [sessionId], references: [id], onDelete: SetNull)
-  table   RestaurantTable? @relation(fields: [tableId], references: [id], onDelete: SetNull)
-  cashier User?           @relation("BillCashier", fields: [cashierId], references: [id], onDelete: SetNull)
+  branch        Branch           @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  session       TableSession?    @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+  table         RestaurantTable? @relation(fields: [tableId], references: [id], onDelete: SetNull)
+  cashier       User?            @relation("BillCashier", fields: [cashierId], references: [id], onDelete: SetNull)
+  refundedBy    User?            @relation("BillRefundedBy", fields: [refundedById], references: [id], onDelete: SetNull)
   creditRecords CreditRecord[]
   payments      Payment[]
 
@@ -357,22 +369,22 @@ model CreditRecord {
 // ── 11. Inventory Items ─────────────────────────────────────
 
 model InventoryItem {
-  id            String   @id @default(uuid())
-  branchId      String   @map("branch_id")
-  name          String
-  unit          String
-  currentStock  Decimal  @default(0.0) @map("current_stock")
-  reorderLevel  Decimal  @default(0.0) @map("reorder_level")
-  costPerUnit   Decimal? @map("cost_per_unit")
-  supplierId    String?  @map("supplier_id")
-  createdAt     DateTime @default(now()) @map("created_at")
-  updatedAt     DateTime @updatedAt @map("updated_at")
+  id           String   @id @default(uuid())
+  branchId     String   @map("branch_id")
+  name         String
+  unit         String
+  currentStock Decimal  @default(0.0) @map("current_stock")
+  reorderLevel Decimal  @default(0.0) @map("reorder_level")
+  costPerUnit  Decimal? @map("cost_per_unit")
+  supplierId   String?  @map("supplier_id")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
 
-  branch          Branch              @relation(fields: [branchId], references: [id], onDelete: Cascade)
-  supplier        Supplier?           @relation(fields: [supplierId], references: [id], onDelete: SetNull)
-  purchaseItems   PurchaseItem[]
+  branch            Branch             @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  supplier          Supplier?          @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+  purchaseItems     PurchaseItem[]
   recipeIngredients RecipeIngredient[]
-  stockMovements  StockMovement[]
+  stockMovements    StockMovement[]
 
   @@map("inventory_items")
 }
@@ -380,19 +392,20 @@ model InventoryItem {
 // ── 12. Bar Stock ────────────────────────────────────────────
 
 model BarStock {
-  id                 String   @id @default(uuid())
-  branchId           String   @map("branch_id")
-  name               String
-  category           String   @default("spirits")
-  bottleCapacityMl   Decimal  @default(750) @map("bottle_capacity_ml")
-  currentBottles     Decimal  @default(0.0) @map("current_bottles")
-  pegsMl             Decimal  @default(30) @map("pegs_ml")
-  pricePerPeg        Decimal  @default(0.0) @map("price_per_peg")
-  createdAt          DateTime @default(now()) @map("created_at")
-  updatedAt          DateTime @updatedAt @map("updated_at")
+  id               String   @id @default(uuid())
+  branchId         String   @map("branch_id")
+  name             String
+  category         String   @default("spirits")
+  bottleCapacityMl Decimal  @default(750) @map("bottle_capacity_ml")
+  currentBottles   Decimal  @default(0.0) @map("current_bottles")
+  pegsMl           Decimal  @default(30) @map("pegs_ml")
+  pricePerPeg      Decimal  @default(0.0) @map("price_per_peg")
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
 
   branch       Branch           @relation(fields: [branchId], references: [id], onDelete: Cascade)
   transactions BarTransaction[]
+  menuItems    MenuItem[]
 
   @@map("bar_stock")
 }
@@ -429,9 +442,9 @@ model Supplier {
   createdAt     DateTime @default(now()) @map("created_at")
   updatedAt     DateTime @updatedAt @map("updated_at")
 
-  branch          Branch          @relation(fields: [branchId], references: [id], onDelete: Cascade)
-  inventoryItems  InventoryItem[]
-  purchases       Purchase[]
+  branch         Branch          @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  inventoryItems InventoryItem[]
+  purchases      Purchase[]
 
   @@map("suppliers")
 }
@@ -459,11 +472,11 @@ model Purchase {
 // ── 16. Purchase Items ───────────────────────────────────────
 
 model PurchaseItem {
-  id                String  @id @default(uuid())
-  purchaseId        String  @map("purchase_id")
-  inventoryItemId   String  @map("inventory_item_id")
-  quantity          Decimal
-  unitCost          Decimal @map("unit_cost")
+  id              String  @id @default(uuid())
+  purchaseId      String  @map("purchase_id")
+  inventoryItemId String  @map("inventory_item_id")
+  quantity        Decimal
+  unitCost        Decimal @map("unit_cost")
 
   purchase      Purchase      @relation(fields: [purchaseId], references: [id], onDelete: Cascade)
   inventoryItem InventoryItem @relation(fields: [inventoryItemId], references: [id], onDelete: Cascade)
@@ -491,15 +504,15 @@ model Expense {
 // ── 18. Customers ────────────────────────────────────────────
 
 model Customer {
-  id             String   @id @default(uuid())
-  branchId       String   @map("branch_id")
-  name           String
-  phone          String   @unique
-  email          String?
-  address        String?
-  loyaltyPoints  Int      @default(0) @map("loyalty_points")
-  createdAt      DateTime @default(now()) @map("created_at")
-  updatedAt      DateTime @updatedAt @map("updated_at")
+  id            String   @id @default(uuid())
+  branchId      String   @map("branch_id")
+  name          String
+  phone         String   @unique
+  email         String?
+  address       String?
+  loyaltyPoints Int      @default(0) @map("loyalty_points")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
 
   branch      Branch               @relation(fields: [branchId], references: [id], onDelete: Cascade)
   loyaltyTxns LoyaltyTransaction[]
@@ -510,17 +523,17 @@ model Customer {
 // ── 19. Reservations ─────────────────────────────────────────
 
 model Reservation {
-  id               String   @id @default(uuid())
-  branchId         String   @map("branch_id")
-  customerName     String   @map("customer_name")
-  customerPhone    String   @map("customer_phone")
-  guestCount       Int      @default(2) @map("guest_count")
-  reservationTime  DateTime @map("reservation_time")
-  status           String   @default("pending") // pending | confirmed | arrived | completed | cancelled | no_show
-  tableId          String?  @map("table_id")
-  notes            String?
-  createdAt        DateTime @default(now()) @map("created_at")
-  updatedAt        DateTime @updatedAt @map("updated_at")
+  id              String   @id @default(uuid())
+  branchId        String   @map("branch_id")
+  customerName    String   @map("customer_name")
+  customerPhone   String   @map("customer_phone")
+  guestCount      Int      @default(2) @map("guest_count")
+  reservationTime DateTime @map("reservation_time")
+  status          String   @default("pending") // pending | confirmed | arrived | completed | cancelled | no_show
+  tableId         String?  @map("table_id")
+  notes           String?
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
 
   branch Branch           @relation(fields: [branchId], references: [id], onDelete: Cascade)
   table  RestaurantTable? @relation(fields: [tableId], references: [id], onDelete: SetNull)
@@ -531,15 +544,15 @@ model Reservation {
 // ── 20. Loyalty Transactions ─────────────────────────────────
 
 model LoyaltyTransaction {
-  id              String   @id @default(uuid())
-  customerId      String   @map("customer_id")
-  branchId        String   @map("branch_id")
-  type            String // earn | redeem
-  points          Int
-  purchaseAmount  Decimal  @default(0.0) @map("purchase_amount")
-  notes           String?
-  createdBy       String?  @map("created_by")
-  createdAt       DateTime @default(now()) @map("created_at")
+  id             String   @id @default(uuid())
+  customerId     String   @map("customer_id")
+  branchId       String   @map("branch_id")
+  type           String // earn | redeem
+  points         Int
+  purchaseAmount Decimal  @default(0.0) @map("purchase_amount")
+  notes          String?
+  createdBy      String?  @map("created_by")
+  createdAt      DateTime @default(now()) @map("created_at")
 
   customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
   branch   Branch   @relation(fields: [branchId], references: [id], onDelete: Cascade)
@@ -562,9 +575,9 @@ model StaffMember {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  branch      Branch        @relation(fields: [branchId], references: [id], onDelete: Cascade)
-  attendance  Attendance[]
-  salaries    Salary[]
+  branch     Branch       @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  attendance Attendance[]
+  salaries   Salary[]
 
   @@map("staff_members")
 }
@@ -572,12 +585,12 @@ model StaffMember {
 // ── 22. Attendance ───────────────────────────────────────────
 
 model Attendance {
-  id        String    @id @default(uuid())
-  staffId   String    @map("staff_id")
-  date      DateTime  @default(now()) @db.Date
-  clockIn   DateTime  @default(now()) @map("clock_in")
-  clockOut  DateTime? @map("clock_out")
-  status    String    @default("present") // present | absent | late | half_day
+  id       String    @id @default(uuid())
+  staffId  String    @map("staff_id")
+  date     DateTime  @default(now()) @db.Date
+  clockIn  DateTime  @default(now()) @map("clock_in")
+  clockOut DateTime? @map("clock_out")
+  status   String    @default("present") // present | absent | late | half_day
 
   staff StaffMember @relation(fields: [staffId], references: [id], onDelete: Cascade)
 
@@ -588,11 +601,11 @@ model Attendance {
 // ── 23. Salaries ─────────────────────────────────────────────
 
 model Salary {
-  id       String   @id @default(uuid())
-  staffId  String   @map("staff_id")
-  amount   Decimal
-  paidAt   DateTime @default(now()) @map("paid_at")
-  status   String   @default("paid") // paid | pending
+  id      String   @id @default(uuid())
+  staffId String   @map("staff_id")
+  amount  Decimal
+  paidAt  DateTime @default(now()) @map("paid_at")
+  status  String   @default("paid") // paid | pending
 
   staff StaffMember @relation(fields: [staffId], references: [id], onDelete: Cascade)
 
@@ -602,17 +615,17 @@ model Salary {
 // ── 24. Audit Logs ───────────────────────────────────────────
 
 model AuditLog {
-  id         String   @id @default(uuid())
-  branchId   String?  @map("branch_id")
-  userId     String?  @map("user_id")
-  action     String
-  tableName  String   @map("table_name")
-  rowId      String?  @map("row_id")
-  oldValues  Json?    @map("old_values")
-  newValues  Json?    @map("new_values")
-  ipAddress  String?  @map("ip_address")
-  device     String?
-  createdAt  DateTime @default(now()) @map("created_at")
+  id        String   @id @default(uuid())
+  branchId  String?  @map("branch_id")
+  userId    String?  @map("user_id")
+  action    String
+  tableName String   @map("table_name")
+  rowId     String?  @map("row_id")
+  oldValues Json?    @map("old_values")
+  newValues Json?    @map("new_values")
+  ipAddress String?  @map("ip_address")
+  device    String?
+  createdAt DateTime @default(now()) @map("created_at")
 
   branch Branch? @relation(fields: [branchId], references: [id], onDelete: SetNull)
   user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
@@ -623,26 +636,31 @@ model AuditLog {
 // ── 25. Shift Closings ───────────────────────────────────────
 
 model ShiftClosing {
-  id                   String   @id @default(uuid())
-  branchId             String   @map("branch_id")
-  cashierId            String?  @map("cashier_id")
-  cashierName          String?  @map("cashier_name")
-  date                 String
-  cashTotal            Decimal  @default(0.0) @map("cash_total")
-  cardTotal            Decimal  @default(0.0) @map("card_total")
-  esewaTotal           Decimal  @default(0.0) @map("esewa_total")
-  khaltiTotal          Decimal  @default(0.0) @map("khalti_total")
-  fonepayTotal         Decimal  @default(0.0) @map("fonepay_total")
-  creditTotal          Decimal  @default(0.0) @map("credit_total")
-  refundTotal          Decimal  @default(0.0) @map("refund_total")
-  totalRevenue         Decimal  @default(0.0) @map("total_revenue")
-  netRevenue           Decimal  @default(0.0) @map("net_revenue")
-  totalVat             Decimal  @default(0.0) @map("total_vat")
-  totalDiscount        Decimal  @default(0.0) @map("total_discount")
-  totalServiceCharge   Decimal  @default(0.0) @map("total_service_charge")
-  billCount            Int      @default(0) @map("bill_count")
-  status               String   @default("pending_approval") // pending_approval | approved | rejected
-  createdAt            DateTime @default(now()) @map("created_at")
+  id                 String   @id @default(uuid())
+  branchId           String   @map("branch_id")
+  cashierId          String?  @map("cashier_id")
+  cashierName        String?  @map("cashier_name")
+  date               String
+  openingFloat       Decimal  @default(0.0) @map("opening_float")
+  countedCash        Decimal  @default(0.0) @map("counted_cash")
+  expectedCash       Decimal  @default(0.0) @map("expected_cash")
+  cashVariance       Decimal  @default(0.0) @map("cash_variance")
+  notes              String?
+  cashTotal          Decimal  @default(0.0) @map("cash_total")
+  cardTotal          Decimal  @default(0.0) @map("card_total")
+  esewaTotal         Decimal  @default(0.0) @map("esewa_total")
+  khaltiTotal        Decimal  @default(0.0) @map("khalti_total")
+  fonepayTotal       Decimal  @default(0.0) @map("fonepay_total")
+  creditTotal        Decimal  @default(0.0) @map("credit_total")
+  refundTotal        Decimal  @default(0.0) @map("refund_total")
+  totalRevenue       Decimal  @default(0.0) @map("total_revenue")
+  netRevenue         Decimal  @default(0.0) @map("net_revenue")
+  totalVat           Decimal  @default(0.0) @map("total_vat")
+  totalDiscount      Decimal  @default(0.0) @map("total_discount")
+  totalServiceCharge Decimal  @default(0.0) @map("total_service_charge")
+  billCount          Int      @default(0) @map("bill_count")
+  status             String   @default("pending_approval") // pending_approval | approved | rejected
+  createdAt          DateTime @default(now()) @map("created_at")
 
   branch  Branch @relation(fields: [branchId], references: [id], onDelete: Cascade)
   cashier User?  @relation("ShiftCashier", fields: [cashierId], references: [id], onDelete: SetNull)
@@ -653,12 +671,12 @@ model ShiftClosing {
 // ── 26. Recipes ──────────────────────────────────────────────
 
 model Recipe {
-  id            String   @id @default(uuid())
-  menuItemId    String   @unique @map("menu_item_id")
-  branchId      String   @map("branch_id")
-  instructions  String?
-  createdAt     DateTime @default(now()) @map("created_at")
-  updatedAt     DateTime @updatedAt @map("updated_at")
+  id           String   @id @default(uuid())
+  menuItemId   String   @unique @map("menu_item_id")
+  branchId     String   @map("branch_id")
+  instructions String?
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
 
   menuItem    MenuItem           @relation(fields: [menuItemId], references: [id], onDelete: Cascade)
   branch      Branch             @relation(fields: [branchId], references: [id], onDelete: Cascade)
@@ -670,11 +688,11 @@ model Recipe {
 // ── 27. Recipe Ingredients ───────────────────────────────────
 
 model RecipeIngredient {
-  id                String   @id @default(uuid())
-  recipeId          String   @map("recipe_id")
-  inventoryItemId   String   @map("inventory_item_id")
-  quantity          Decimal
-  createdAt         DateTime @default(now()) @map("created_at")
+  id              String   @id @default(uuid())
+  recipeId        String   @map("recipe_id")
+  inventoryItemId String   @map("inventory_item_id")
+  quantity        Decimal
+  createdAt       DateTime @default(now()) @map("created_at")
 
   recipe        Recipe        @relation(fields: [recipeId], references: [id], onDelete: Cascade)
   inventoryItem InventoryItem @relation(fields: [inventoryItemId], references: [id], onDelete: Cascade)

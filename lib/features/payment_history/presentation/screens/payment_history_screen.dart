@@ -145,10 +145,22 @@ class _PaymentHistoryScreenState extends ConsumerState<PaymentHistoryScreen> {
               data: (bills) {
                 final f = _filter(bills);
                 if (f.isEmpty) return Center(child: Text('No payments found', style: GoogleFonts.outfit(color: AppColors.textSecondary)));
+                final role = ref.watch(authNotifierProvider).value?.role;
+                final canRefund = role == 'branch_manager' || role == 'accountant';
                 return ResponsiveContent(child: ListView.builder(
                   padding: const EdgeInsets.all(16),
                   itemCount: f.length,
-                  itemBuilder: (ctx, i) => _PaymentCard(bill: f[i], fmt: fmt).animate().fadeIn(delay: Duration(milliseconds: i * 25)),
+                  itemBuilder: (ctx, i) {
+                    final bill = f[i];
+                    final reversible = canRefund &&
+                        bill.paymentStatus != 'refunded' &&
+                        bill.paymentStatus != 'voided';
+                    return InkWell(
+                      borderRadius: BorderRadius.circular(12),
+                      onTap: reversible ? () => _showRefundSheet(bill) : null,
+                      child: _PaymentCard(bill: bill, fmt: fmt),
+                    ).animate().fadeIn(delay: Duration(milliseconds: i * 25));
+                  },
                 ));
               },
             ),
@@ -167,6 +179,131 @@ class _PaymentHistoryScreenState extends ConsumerState<PaymentHistoryScreen> {
   Future<void> _pickRange() async {
     final picked = await showDateRangePicker(context: context, firstDate: DateTime(2024), lastDate: DateTime.now(), initialDateRange: _range);
     if (picked != null) setState(() => _range = picked);
+  }
+
+  Future<void> _showRefundSheet(Bill bill) async {
+    final result = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: AppColors.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
+      ),
+      builder: (_) => _RefundSheet(bill: bill, fmt: fmt),
+    );
+    if (result == true) {
+      ref.invalidate(billsStreamProvider);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Bill reversed & stock restored'), backgroundColor: AppColors.success),
+        );
+      }
+    }
+  }
+}
+
+/// Manager-only sheet to void (raised in error) or refund (money returned) a
+/// settled bill. Requires a reason; the backend reverses money, credit and the
+/// stock deducted at order time.
+class _RefundSheet extends ConsumerStatefulWidget {
+  final Bill bill;
+  final NumberFormat fmt;
+  const _RefundSheet({required this.bill, required this.fmt});
+  @override
+  ConsumerState<_RefundSheet> createState() => _RefundSheetState();
+}
+
+class _RefundSheetState extends ConsumerState<_RefundSheet> {
+  String _type = 'refund';
+  final _reason = TextEditingController();
+  bool _busy = false;
+
+  @override
+  void dispose() {
+    _reason.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    if (_reason.text.trim().length < 3) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please enter a reason (min 3 characters)'), backgroundColor: AppColors.error),
+      );
+      return;
+    }
+    setState(() => _busy = true);
+    try {
+      await ApiClient.instance.post(
+        ApiConstants.refundBill(widget.bill.id),
+        data: {'type': _type, 'reason': _reason.text.trim()},
+      );
+      if (mounted) Navigator.pop(context, true);
+    } catch (e) {
+      if (mounted) {
+        setState(() => _busy = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed: $e'), backgroundColor: AppColors.error),
+        );
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.only(
+        left: 20, right: 20, top: 18,
+        bottom: MediaQuery.of(context).viewInsets.bottom + 20,
+      ),
+      child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          const Icon(Icons.undo_rounded, color: AppColors.error, size: 20),
+          const SizedBox(width: 8),
+          Text('Void / Refund Bill', style: GoogleFonts.outfit(fontSize: 17, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+        ]),
+        const SizedBox(height: 4),
+        Text('${widget.bill.invoiceNumber} • NPR ${widget.fmt.format(widget.bill.totalAmount)} • ${widget.bill.paymentMethod.toUpperCase()}',
+            style: GoogleFonts.outfit(fontSize: 12, color: AppColors.textSecondary)),
+        const SizedBox(height: 16),
+        SegmentedButton<String>(
+          segments: const [
+            ButtonSegment(value: 'refund', label: Text('Refund'), icon: Icon(Icons.payments_outlined, size: 16)),
+            ButtonSegment(value: 'void', label: Text('Void'), icon: Icon(Icons.block_flipped, size: 16)),
+          ],
+          selected: {_type},
+          onSelectionChanged: (s) => setState(() => _type = s.first),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          _type == 'refund'
+              ? 'Money is returned to the customer. Ingredients & bar pegs are restored.'
+              : 'Bill was raised in error. Money, credit & stock are all reversed.',
+          style: GoogleFonts.outfit(fontSize: 11, color: AppColors.textSecondary),
+        ),
+        const SizedBox(height: 14),
+        TextField(
+          controller: _reason,
+          maxLines: 2,
+          decoration: const InputDecoration(
+            labelText: 'Reason *',
+            hintText: 'e.g. wrong table billed, customer complaint...',
+            isDense: true,
+          ),
+        ),
+        const SizedBox(height: 18),
+        Row(children: [
+          Expanded(child: OutlinedButton(onPressed: _busy ? null : () => Navigator.pop(context), child: const Text('Cancel'))),
+          const SizedBox(width: 12),
+          Expanded(child: FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: AppColors.error),
+            onPressed: _busy ? null : _submit,
+            child: _busy
+                ? const SizedBox(height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                : Text(_type == 'refund' ? 'Confirm Refund' : 'Confirm Void'),
+          )),
+        ]),
+      ]),
+    );
   }
 }
 
@@ -196,6 +333,7 @@ class _PaymentCard extends StatelessWidget {
       case 'paid': return AppColors.success;
       case 'credit': return AppColors.warning;
       case 'refunded': return AppColors.error;
+      case 'voided': return AppColors.error;
       default: return AppColors.info;
     }
   }

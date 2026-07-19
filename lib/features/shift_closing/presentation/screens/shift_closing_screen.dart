@@ -24,12 +24,29 @@ class _ShiftClosingScreenState extends ConsumerState<ShiftClosingScreen> {
   Map<String, dynamic>? _summary;
 
   final _fmt = NumberFormat('#,##0.00');
+  final _openingFloatCtrl = TextEditingController(text: '0');
+  final _countedCashCtrl = TextEditingController();
+  final _notesCtrl = TextEditingController();
 
   @override
   void initState() {
     super.initState();
     _loadTodaySummary();
   }
+
+  @override
+  void dispose() {
+    _openingFloatCtrl.dispose();
+    _countedCashCtrl.dispose();
+    _notesCtrl.dispose();
+    super.dispose();
+  }
+
+  double get _openingFloat => double.tryParse(_openingFloatCtrl.text.trim()) ?? 0;
+  double get _countedCash => double.tryParse(_countedCashCtrl.text.trim()) ?? 0;
+  double get _expectedCash =>
+      _openingFloat + ((_summary?['cash'] as num?)?.toDouble() ?? 0);
+  double get _cashVariance => _countedCash - _expectedCash;
 
   Future<void> _loadTodaySummary() async {
     setState(() => _loading = true);
@@ -143,6 +160,12 @@ class _ShiftClosingScreenState extends ConsumerState<ShiftClosingScreen> {
                       const _SectionHeader('Adjustments'),
                       const SizedBox(height: 12),
                       _AdjustmentSection(summary: _summary!, fmt: _fmt),
+                      const SizedBox(height: 20),
+
+                      // Cash Reconciliation (Z-report over/short)
+                      const _SectionHeader('Cash Reconciliation'),
+                      const SizedBox(height: 12),
+                      _buildReconciliation(),
                       const SizedBox(height: 32),
 
                       // Submit Button
@@ -171,6 +194,101 @@ class _ShiftClosingScreenState extends ConsumerState<ShiftClosingScreen> {
     );
   }
 
+  /// Opening float + counted cash → expected cash and the over/short variance.
+  /// Rebuilds live as the user types so the cashier sees the drawer difference
+  /// before closing.
+  Widget _buildReconciliation() {
+    final variance = _cashVariance;
+    final vColor = variance == 0
+        ? AppColors.success
+        : (variance > 0 ? AppColors.info : AppColors.error);
+    final vLabel = variance == 0
+        ? 'Balanced'
+        : (variance > 0 ? 'Over (extra in drawer)' : 'Short (missing)');
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.card,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(children: [
+            Expanded(
+              child: TextField(
+                controller: _openingFloatCtrl,
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                onChanged: (_) => setState(() {}),
+                decoration: const InputDecoration(
+                  labelText: 'Opening Float (NPR)',
+                  isDense: true,
+                  prefixIcon: Icon(Icons.savings_rounded, size: 18),
+                ),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: TextField(
+                controller: _countedCashCtrl,
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                onChanged: (_) => setState(() {}),
+                decoration: const InputDecoration(
+                  labelText: 'Counted Cash (NPR)',
+                  isDense: true,
+                  prefixIcon: Icon(Icons.point_of_sale_rounded, size: 18),
+                ),
+              ),
+            ),
+          ]),
+          const SizedBox(height: 14),
+          _reconRow('Expected in drawer', _expectedCash, AppColors.textPrimary),
+          const SizedBox(height: 6),
+          _reconRow('Counted', _countedCash, AppColors.textPrimary),
+          const Divider(height: 22),
+          Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+            Row(children: [
+              Icon(
+                variance == 0
+                    ? Icons.check_circle_rounded
+                    : Icons.report_problem_rounded,
+                size: 16,
+                color: vColor,
+              ),
+              const SizedBox(width: 6),
+              Text(vLabel,
+                  style: GoogleFonts.outfit(
+                      fontSize: 13, fontWeight: FontWeight.w600, color: vColor)),
+            ]),
+            Text('NPR ${_fmt.format(variance)}',
+                style: GoogleFonts.outfit(
+                    fontSize: 15, fontWeight: FontWeight.w800, color: vColor)),
+          ]),
+          const SizedBox(height: 14),
+          TextField(
+            controller: _notesCtrl,
+            maxLines: 2,
+            decoration: const InputDecoration(
+              labelText: 'Notes (optional)',
+              hintText: 'Explain any variance, e.g. paid supplier from drawer…',
+              isDense: true,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _reconRow(String label, double value, Color color) {
+    return Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+      Text(label, style: GoogleFonts.outfit(fontSize: 13, color: AppColors.textSecondary)),
+      Text('NPR ${_fmt.format(value)}',
+          style: GoogleFonts.outfit(fontSize: 13, fontWeight: FontWeight.w600, color: color)),
+    ]);
+  }
+
   Future<void> _closeShift(BuildContext context, dynamic profile) async {
     final confirmed = await showConfirmDialog(
       context,
@@ -193,6 +311,11 @@ class _ShiftClosingScreenState extends ConsumerState<ShiftClosingScreen> {
           'branchId': profileBranchId,
           'cashierName': profile?.fullName,
           'date': DateTime.now().toIso8601String().substring(0, 10),
+          // Human-observed inputs — the money totals below are recomputed
+          // server-side, but sent for backward compatibility.
+          'openingFloat': _openingFloat,
+          'countedCash': _countedCash,
+          if (_notesCtrl.text.trim().isNotEmpty) 'notes': _notesCtrl.text.trim(),
           'cashTotal': _summary!['cash'],
           'cardTotal': _summary!['card'],
           'esewaTotal': _summary!['esewa'],

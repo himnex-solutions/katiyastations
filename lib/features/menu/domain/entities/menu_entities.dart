@@ -44,6 +44,10 @@ class MenuItem extends Equatable {
   final String? imageUrl;
   final bool isAvailable;
   final String type; // food | drink | bar
+  // When set, selling this item auto-deducts `pegsPerServing` pegs from the
+  // linked BarStock bottle on order.
+  final String? barStockId;
+  final double? pegsPerServing;
 
   const MenuItem({
     required this.id,
@@ -57,6 +61,8 @@ class MenuItem extends Equatable {
     this.imageUrl,
     this.isAvailable = true,
     this.type = 'food',
+    this.barStockId,
+    this.pegsPerServing,
   });
 
   factory MenuItem.fromJson(Map<String, dynamic> json) {
@@ -72,9 +78,11 @@ class MenuItem extends Equatable {
       imageUrl: json['image_url'] as String?,
       isAvailable: json['is_available'] as bool? ?? true,
       type: json['type'] as String? ?? 'food',
+      barStockId: json['bar_stock_id'] as String?,
+      pegsPerServing: (json['pegs_per_serving'] as num?)?.toDouble(),
     );
   }
 
   @override
-  List<Object?> get props => [id, name, price, isAvailable, categoryId];
+  List<Object?> get props => [id, name, price, isAvailable, categoryId, barStockId];
 }

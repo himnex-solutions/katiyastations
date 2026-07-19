@@ -323,10 +323,10 @@ export class KotsService {
     return this.prisma.tableSession.update({ where: { id: sessionId }, data: { totalAmount: total } });
   }
 
-  /** Deducts recipe ingredients for every item on a newly-created KOT.
-   * Silently skips items with no recipe defined yet (most MenuItems won't
-   * have one) — this must never error out order creation over missing
-   * costing data. */
+  /** Deducts recipe ingredients AND linked bar pegs for every item on a
+   * newly-created KOT. Silently skips items with no recipe/bar link defined
+   * yet (most MenuItems won't have one) — this must never error out order
+   * creation over missing costing data. */
   private async deductStockForItems(
     branchId: string,
     kotNumber: string,
@@ -366,39 +366,104 @@ export class KotsService {
         }
       }
     }
+
+    await this.applyBarForItems(branchId, items, 'out');
   }
 
-  /** Reverses deductStockForItems for one cancelled item — only called
-   * when that item's own status was still 'pending' (kitchen hadn't
-   * started preparing it), matching the "restock if cancelled before
-   * preparation" rule. */
+  /** Reverses deductStockForItems for one item — restores both recipe
+   * ingredients and linked bar pegs. Used for a pre-kitchen item cancel and
+   * (via restockSessionItems) when a settled bill is voided/refunded. */
   private async restoreStockForItem(
     branchId: string,
     item: { menuItemId: string; quantity: number },
+    reason = 'KOT item cancelled',
   ) {
     const recipe = await this.prisma.recipe.findUnique({
       where: { menuItemId: item.menuItemId },
       include: { ingredients: true },
     });
-    if (!recipe || recipe.ingredients.length === 0) return;
 
-    for (const ingredient of recipe.ingredients) {
-      const restored = Number(ingredient.quantity) * item.quantity;
-      await this.prisma.$transaction([
-        this.prisma.inventoryItem.update({
-          where: { id: ingredient.inventoryItemId },
-          data: { currentStock: { increment: restored } },
+    if (recipe && recipe.ingredients.length > 0) {
+      for (const ingredient of recipe.ingredients) {
+        const restored = Number(ingredient.quantity) * item.quantity;
+        await this.prisma.$transaction([
+          this.prisma.inventoryItem.update({
+            where: { id: ingredient.inventoryItemId },
+            data: { currentStock: { increment: restored } },
+          }),
+          this.prisma.stockMovement.create({
+            data: {
+              branchId,
+              itemId: ingredient.inventoryItemId,
+              type: 'in',
+              quantity: restored,
+              reason,
+            },
+          }),
+        ]);
+      }
+    }
+
+    await this.applyBarForItems(branchId, [item], 'in');
+  }
+
+  /** Adjusts BarStock bottles for the bar-linked items in an order.
+   * 'out' on sale decrements bottles by the pegs consumed; 'in' restores them
+   * on cancel/refund. Bar equivalent of the recipe→inventory deduction; items
+   * with no bar_stock_id are skipped. */
+  private async applyBarForItems(
+    branchId: string,
+    items: { menuItemId: string; quantity: number }[],
+    direction: 'out' | 'in',
+  ) {
+    if (items.length === 0) return;
+
+    const linked = await this.prisma.menuItem.findMany({
+      where: { id: { in: items.map((i) => i.menuItemId) }, barStockId: { not: null } },
+      select: { id: true, barStockId: true, pegsPerServing: true },
+    });
+    if (linked.length === 0) return;
+    const linkById = new Map(linked.map((m) => [m.id, m]));
+
+    for (const orderItem of items) {
+      const link = linkById.get(orderItem.menuItemId);
+      if (!link?.barStockId || !link.pegsPerServing) continue;
+
+      const stock = await this.prisma.barStock.findUnique({ where: { id: link.barStockId } });
+      if (!stock) continue;
+
+      const totalPegs = Number(link.pegsPerServing) * orderItem.quantity;
+      const bottleFraction = (totalPegs * Number(stock.pegsMl)) / Number(stock.bottleCapacityMl);
+
+      const [updated] = await this.prisma.$transaction([
+        this.prisma.barStock.update({
+          where: { id: stock.id },
+          data:
+            direction === 'out'
+              ? { currentBottles: { decrement: bottleFraction } }
+              : { currentBottles: { increment: bottleFraction } },
         }),
-        this.prisma.stockMovement.create({
-          data: {
-            branchId,
-            itemId: ingredient.inventoryItemId,
-            type: 'in',
-            quantity: restored,
-            reason: 'KOT item cancelled',
-          },
+        this.prisma.barTransaction.create({
+          data: { branchId, itemId: stock.id, type: direction, quantity: bottleFraction },
         }),
       ]);
+
+      if (direction === 'out' && Number(updated.currentBottles) <= 1) {
+        this.realtime.lowStock(branchId, updated);
+      }
+    }
+  }
+
+  /** Restocks every non-cancelled item on a session's KOTs (recipe ingredients
+   * + bar pegs). Called when a settled bill is voided/refunded and the stock
+   * that was deducted at order time must be returned. */
+  async restockSessionItems(sessionId: string, branchId: string, reason: string) {
+    const items = await this.prisma.kotItem.findMany({
+      where: { kot: { sessionId }, status: { not: 'cancelled' } },
+      select: { menuItemId: true, quantity: true },
+    });
+    for (const item of items) {
+      await this.restoreStockForItem(branchId, item, reason);
     }
   }
 }

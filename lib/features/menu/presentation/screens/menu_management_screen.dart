@@ -60,6 +60,20 @@ final menuItemsAllProvider = FutureProvider<List<MenuItem>>((ref) async {
     ..sort((a, b) => a.name.compareTo(b.name));
 });
 
+// Bar bottles for the branch — used to link a bar menu item to a bottle so
+// selling it auto-deducts pegs.
+final menuBarStockProvider =
+    FutureProvider<List<Map<String, dynamic>>>((ref) async {
+  final profile = ref.watch(authNotifierProvider).value;
+  if (profile?.branchId == null) return [];
+  final response = await ApiClient.instance.get(
+    ApiConstants.barStock,
+    queryParameters: {'branchId': profile!.branchId!, 'limit': '300'},
+  );
+  final data = response.data as Map<String, dynamic>;
+  return List<Map<String, dynamic>>.from(data['data'] as List? ?? []);
+});
+
 /// Reloads every cached view of the menu — this screen's three providers plus
 /// the copies the waiter ordering screen keeps. Passing a family invalidates
 /// all of its live instances, which matters after a bulk import creates
@@ -922,6 +936,17 @@ class _MenuManagementScreenState extends ConsumerState<MenuManagementScreen> {
     final imageUrlCtrl = TextEditingController(text: existing?.imageUrl ?? '');
     final descCtrl = TextEditingController(text: existing?.description ?? '');
 
+    // Bar link — optional. Manager can tie this item to a bottle so selling it
+    // deducts pegs. Loaded best-effort; on failure the section just shows empty.
+    List<Map<String, dynamic>> barStocks = [];
+    try {
+      barStocks = await ref.read(menuBarStockProvider.future);
+    } catch (_) {}
+    String? barStockId = existing?.barStockId;
+    final pegsCtrl = TextEditingController(
+        text: existing?.pegsPerServing?.toString() ?? '1');
+
+    if (!context.mounted) return;
     await showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -952,38 +977,72 @@ class _MenuManagementScreenState extends ConsumerState<MenuManagementScreen> {
           ],
         ),
         content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: nameCtrl,
-                autofocus: true,
-                decoration: _premiumFieldDecoration(
-                    label: 'Item Name *', icon: Icons.fastfood_rounded),
-              ),
-              const SizedBox(height: 14),
-              TextField(
-                controller: priceCtrl,
-                keyboardType: TextInputType.number,
-                decoration: _premiumFieldDecoration(
-                    label: 'Selling Price (NPR) *',
-                    icon: Icons.payments_rounded),
-              ),
-              const SizedBox(height: 14),
-              TextField(
-                controller: imageUrlCtrl,
-                decoration: _premiumFieldDecoration(
-                    label: 'Image URL (paste image link)',
-                    icon: Icons.image_outlined),
-              ),
-              const SizedBox(height: 14),
-              TextField(
-                controller: descCtrl,
-                maxLines: 2,
-                decoration: _premiumFieldDecoration(
-                    label: 'Description', icon: Icons.notes_rounded),
-              ),
-            ],
+          child: StatefulBuilder(
+            builder: (ctx, setLocal) => Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: nameCtrl,
+                  autofocus: true,
+                  decoration: _premiumFieldDecoration(
+                      label: 'Item Name *', icon: Icons.fastfood_rounded),
+                ),
+                const SizedBox(height: 14),
+                TextField(
+                  controller: priceCtrl,
+                  keyboardType: TextInputType.number,
+                  decoration: _premiumFieldDecoration(
+                      label: 'Selling Price (NPR) *',
+                      icon: Icons.payments_rounded),
+                ),
+                const SizedBox(height: 14),
+                TextField(
+                  controller: imageUrlCtrl,
+                  decoration: _premiumFieldDecoration(
+                      label: 'Image URL (paste image link)',
+                      icon: Icons.image_outlined),
+                ),
+                const SizedBox(height: 14),
+                TextField(
+                  controller: descCtrl,
+                  maxLines: 2,
+                  decoration: _premiumFieldDecoration(
+                      label: 'Description', icon: Icons.notes_rounded),
+                ),
+                const SizedBox(height: 14),
+                // ── Bar bottle link (optional) ──────────────────────
+                DropdownButtonFormField<String?>(
+                  value: barStockId,
+                  isExpanded: true,
+                  decoration: _premiumFieldDecoration(
+                      label: 'Bar bottle (auto-deduct pegs)',
+                      icon: Icons.local_bar_rounded),
+                  items: [
+                    const DropdownMenuItem<String?>(
+                        value: null, child: Text('None (not a bar item)')),
+                    ...barStocks.map((b) => DropdownMenuItem<String?>(
+                          value: b['id'] as String,
+                          child: Text(
+                            '${b['name']} (${b['pegs_ml'] ?? 30}ml pegs)',
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        )),
+                  ],
+                  onChanged: (v) => setLocal(() => barStockId = v),
+                ),
+                if (barStockId != null) ...[
+                  const SizedBox(height: 14),
+                  TextField(
+                    controller: pegsCtrl,
+                    keyboardType:
+                        const TextInputType.numberWithOptions(decimal: true),
+                    decoration: _premiumFieldDecoration(
+                        label: 'Pegs per serving *',
+                        icon: Icons.wine_bar_rounded),
+                  ),
+                ],
+              ],
+            ),
           ),
         ),
         actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
@@ -1028,6 +1087,11 @@ class _MenuManagementScreenState extends ConsumerState<MenuManagementScreen> {
                       ? null
                       : descCtrl.text.trim(),
                   'isAvailable': existing?.isAvailable ?? true,
+                  // null unlinks; when linked, default to 1 peg/serving.
+                  'barStockId': barStockId,
+                  'pegsPerServing': barStockId == null
+                      ? null
+                      : (double.tryParse(pegsCtrl.text.trim()) ?? 1),
                 };
                 if (existing == null) {
                   await ApiClient.instance

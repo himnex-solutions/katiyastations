@@ -3,6 +3,7 @@ import { BillingService } from './billing.service';
 import { GenerateBillDto } from './dto/generate-bill.dto';
 import { UpdateBillDto } from './dto/update-bill.dto';
 import { AddPaymentDto } from './dto/add-payment.dto';
+import { RefundBillDto } from './dto/refund-bill.dto';
 import { BranchFilterDto } from '../../common/dto/branch-filter.dto';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { BlockSuperAdmin } from '../../common/decorators/block-super-admin.decorator';
@@ -45,6 +46,16 @@ export class BillingController {
     @Body() dto: AddPaymentDto,
   ) {
     return this.billingService.addPayment(id, user, dto);
+  }
+
+  @Roles('branch_manager', 'accountant')
+  @Post('bills/:id/refund')
+  refund(
+    @Param('id') id: string,
+    @CurrentUser() user: CurrentUserPayload,
+    @Body() dto: RefundBillDto,
+  ) {
+    return this.billingService.refund(id, user, dto);
   }
 
   @Get('payment-history')

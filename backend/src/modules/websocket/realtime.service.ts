@@ -55,6 +55,10 @@ export class RealtimeService {
     this.gateway.emitToRoom(SocketRooms.branch(branchId), SocketEvents.billPaid, payload);
   }
 
+  billRefunded(branchId: string, payload: unknown) {
+    this.gateway.emitToRoom(SocketRooms.branch(branchId), SocketEvents.billRefunded, payload);
+  }
+
   lowStock(branchId: string, payload: unknown) {
     this.gateway.emitToRoom(SocketRooms.branch(branchId), SocketEvents.inventoryLowStock, payload);
   }

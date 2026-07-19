@@ -1,15 +1,26 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { RealtimeService } from '../websocket/realtime.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
+import { KotsService } from '../kots/kots.service';
 import { GenerateBillDto } from './dto/generate-bill.dto';
 import { UpdateBillDto } from './dto/update-bill.dto';
 import { AddPaymentDto } from './dto/add-payment.dto';
+import { RefundBillDto } from './dto/refund-bill.dto';
 import { CurrentUserPayload } from '../../common/decorators/current-user.decorator';
 import { resolveBranchScope } from '../../common/utils/branch-scope.util';
 import { buildPaginationMeta } from '../../common/dto/pagination.dto';
 import { BranchFilterDto } from '../../common/dto/branch-filter.dto';
 import { generateSequenceNumber } from '../../common/utils/sequence.util';
+
+/** Only a manager (or the accountant who owns the books) may reverse settled
+ * money — a cashier can take payment but not undo one. */
+const REFUND_ROLES = ['branch_manager', 'accountant'];
 
 @Injectable()
 export class BillingService {
@@ -17,6 +28,7 @@ export class BillingService {
     private readonly prisma: PrismaService,
     private readonly realtime: RealtimeService,
     private readonly auditLogs: AuditLogsService,
+    private readonly kots: KotsService,
   ) {}
 
   async findAll(currentUser: CurrentUserPayload, filter: BranchFilterDto) {
@@ -208,6 +220,90 @@ export class BillingService {
       tableName: 'bills',
       rowId: billId,
       newValues: { method: dto.method, amount: dto.amount, totalPaid, paymentStatus },
+    });
+
+    return updated;
+  }
+
+  /**
+   * Reverses a settled bill — a manager-authorised void (raised in error) or
+   * refund (money returned). One atomic action: records who/why on the bill,
+   * flips the payment status, writes a negative "refund" Payment so the tender
+   * ledger nets to zero, cancels any open credit record, and restocks the
+   * recipe ingredients + bar pegs that were deducted at order time.
+   */
+  async refund(billId: string, currentUser: CurrentUserPayload, dto: RefundBillDto) {
+    if (!REFUND_ROLES.includes(currentUser.role)) {
+      throw new ForbiddenException('Only a manager or accountant can void or refund a bill');
+    }
+
+    const bill = await this.findOne(billId);
+    if (bill.paymentStatus === 'refunded' || bill.paymentStatus === 'voided') {
+      throw new BadRequestException('This bill has already been reversed');
+    }
+
+    const actor = await this.prisma.user.findUnique({ where: { id: currentUser.userId } });
+    const newStatus = dto.type === 'void' ? 'voided' : 'refunded';
+
+    // Reverse only money that was actually tendered — i.e. the sum of real
+    // Payment rows. A pure credit bill has none (the cash was never collected),
+    // so nothing is refunded there beyond cancelling the credit record.
+    const payments = await this.prisma.payment.findMany({ where: { billId } });
+    const tendered = payments.reduce((sum, p) => sum + Number(p.amount), 0);
+
+    const updated = await this.prisma.$transaction(async (tx) => {
+      // Negative tender so payment history / shift totals net the money back out.
+      if (tendered > 0) {
+        await tx.payment.create({
+          data: {
+            billId,
+            method: dto.refundMethod ?? bill.paymentMethod,
+            amount: -tendered,
+            referenceNumber: `${dto.type.toUpperCase()}: ${dto.reason}`.slice(0, 190),
+            receivedById: currentUser.userId,
+          },
+        });
+      }
+
+      // Cancel any still-open credit raised by this bill.
+      await tx.creditRecord.updateMany({
+        where: { billId, status: { notIn: ['paid'] } },
+        data: { status: 'cancelled' },
+      });
+
+      return tx.bill.update({
+        where: { id: billId },
+        data: {
+          paymentStatus: newStatus,
+          refundType: dto.type,
+          refundReason: dto.reason,
+          refundedById: currentUser.userId,
+          refundedByName: actor?.fullName,
+          refundedAt: new Date(),
+        },
+      });
+    });
+
+    // Restock outside the bill transaction: each item's restore is already its
+    // own transaction (in kots.service), and a missing recipe/bar link must not
+    // roll back a completed refund.
+    if (bill.sessionId) {
+      await this.kots.restockSessionItems(
+        bill.sessionId,
+        bill.branchId,
+        `${dto.type} bill ${bill.billNumber}`,
+      );
+    }
+
+    this.realtime.billRefunded(bill.branchId, updated);
+    this.auditLogs.record({
+      branchId: bill.branchId,
+      userId: currentUser.userId,
+      action: dto.type === 'void' ? 'bill_voided' : 'bill_refunded',
+      tableName: 'bills',
+      rowId: billId,
+      oldValues: { paymentStatus: bill.paymentStatus, tendered },
+      newValues: { paymentStatus: newStatus, reason: dto.reason },
     });
 
     return updated;
