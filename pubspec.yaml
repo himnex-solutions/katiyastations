@@ -32,7 +32,13 @@ dependencies:
   firebase_messaging: ^15.1.3
   flutter_local_notifications: ^17.2.2
 
-  # Offline Database (Isar)
+  # Offline Database (Isar) — NATIVE ONLY.
+  # Isar 3.x is a native-first engine: isar_generator emits 64-bit schema-hash
+  # literals (e.g. 7675659480273757682) that dart2js cannot represent, and there
+  # is no Isar web backend. So Isar is never imported from the web entrypoint —
+  # it lives behind offline_store_io.dart (conditional import in offline_store.dart),
+  # while Flutter Web uses the SharedPreferences-backed offline_store_web.dart.
+  # Bumping these versions does NOT make the generated code web-safe; do not try.
   isar: ^3.1.0+1
   isar_flutter_libs: ^3.1.0+1
 

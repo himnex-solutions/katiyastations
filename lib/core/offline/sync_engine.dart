@@ -11,10 +11,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../errors/app_exceptions.dart';
 import '../network/api_client.dart';
-import 'isar_schemas.dart';
-import 'isar_service.dart';
 import 'offline_cache.dart';
-import 'offline_store.dart';
+import 'offline_store.dart'; // provides OfflineStore + SyncQueueItem
 
 // Providers whose data is refreshed after a drain, so synced orders/tables
 // appear immediately (the socket also pushes them, this covers the gap).
@@ -50,7 +48,7 @@ class SyncEngine {
   /// Replay every pending operation, oldest first. Safe to call repeatedly and
   /// concurrently — a second call while one is running is a no-op.
   Future<void> syncNow() async {
-    if (_running || !IsarService.instance.isInitialized) return;
+    if (_running || !OfflineStore.instance.isReady) return;
     _running = true;
     var changed = false;
     try {
@@ -59,7 +57,7 @@ class SyncEngine {
         final result = await _replay(op);
         if (result == _Replay.ok) {
           await _cleanupAfterSync(op);
-          await OfflineStore.instance.deleteOp(op.id);
+          await OfflineStore.instance.deleteOp(op.id!);
           changed = true;
         } else if (result == _Replay.permanentFail) {
           op.isFailed = true;

@@ -53,3 +53,6 @@ backend/firebase-service-account.json
 
 # Android Gradle build output
 /android/build/
+
+# Release build artifacts (APK / Windows installer) — not pushed to GitHub
+/Output/

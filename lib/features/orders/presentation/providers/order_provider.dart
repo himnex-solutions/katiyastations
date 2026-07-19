@@ -4,9 +4,8 @@ import '../../../../core/network/api_client.dart';
 import '../../../../core/errors/app_exceptions.dart';
 import '../../../../core/offline/connectivity_provider.dart';
 import '../../../../core/offline/offline_cache.dart';
-import '../../../../core/offline/offline_store.dart';
+import '../../../../core/offline/offline_store.dart'; // OfflineKot/Item models
 import '../../../../core/offline/offline_ids.dart';
-import '../../../../core/offline/isar_schemas.dart';
 import '../../../../core/offline/sync_engine.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
 import '../../../menu/domain/entities/menu_entities.dart';
