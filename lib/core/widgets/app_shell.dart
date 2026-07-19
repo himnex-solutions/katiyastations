@@ -9,6 +9,8 @@ import '../../features/auth/presentation/providers/auth_provider.dart';
 import '../../router/app_router.dart';
 import '../network/realtime_sync.dart';
 import '../printing/kot_auto_print.dart';
+import '../offline/connectivity_provider.dart';
+import 'offline_banner.dart';
 
 /// Human label for a role — shared by the desktop rail footer and the mobile
 /// account sheet so both name the role the same way.
@@ -51,6 +53,9 @@ class AppShell extends ConsumerWidget {
     // Print-station devices (kitchen tablet/PC with a thermal printer) auto-
     // print each incoming KOT the moment a waiter sends it. No-op on web.
     ref.watch(kotAutoPrintProvider);
+    // Starts connectivity monitoring for the whole session — drives the
+    // offline banner and flushes the offline order queue on reconnect.
+    ref.watch(connectivityProvider);
     final profileAsync = ref.watch(authNotifierProvider);
     final profile = profileAsync.value;
     final navItems = getNavItemsForRole(profile?.role);
@@ -62,7 +67,7 @@ class AppShell extends ConsumerWidget {
     // rather than crash: Material's NavigationBar hard-asserts on having
     // at least 2 destinations, which too few navItems would violate.
     if (navItems.length < 2) {
-      return Scaffold(body: child);
+      return Scaffold(body: _withBanner(child));
     }
 
     if (isWide) {
@@ -80,7 +85,7 @@ class AppShell extends ConsumerWidget {
                 if (context.mounted) context.go('/login');
               },
             ),
-            Expanded(child: child),
+            Expanded(child: _withBanner(child)),
           ],
         ),
       );
@@ -113,7 +118,7 @@ class AppShell extends ConsumerWidget {
         : (currentIdx < 0 ? 0 : currentIdx);
 
     return Scaffold(
-      body: child,
+      body: _withBanner(child),
       bottomNavigationBar: NavigationBar(
         height: 64,
         selectedIndex: selectedIndex < 0 ? 0 : selectedIndex,
@@ -145,6 +150,15 @@ class AppShell extends ConsumerWidget {
       ),
     );
   }
+
+  /// Puts the global offline / sync status strip above whatever screen is
+  /// currently showing under the shell.
+  Widget _withBanner(Widget child) => Column(
+        children: [
+          const OfflineBanner(),
+          Expanded(child: child),
+        ],
+      );
 
   void _showMoreSheet(
       BuildContext context, List<NavItem> items, WidgetRef ref, dynamic profile) {

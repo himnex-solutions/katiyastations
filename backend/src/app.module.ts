@@ -52,7 +52,11 @@ import { SuperAdminModule } from './modules/super-admin/super-admin.module';
       isGlobal: true,
       load: [appConfig, databaseConfig, redisConfig, jwtConfig, minioConfig],
     }),
-    ThrottlerModule.forRoot([{ ttl: 60_000, limit: 120 }]),
+    // Per-IP safety net across all routes. Sized generously because a whole
+    // restaurant shares one public IP (login has its own per-account limit —
+    // see LoginThrottleGuard). Live order/table updates run over WebSockets,
+    // not HTTP, so they don't count against this.
+    ThrottlerModule.forRoot([{ ttl: 60_000, limit: 600 }]),
     // Drives NotificationsService.purgeExpired — the 12-hour bell reset.
     ScheduleModule.forRoot(),
     PrismaModule,

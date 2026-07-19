@@ -18,6 +18,14 @@ export class CreateKotItemDto {
 }
 
 export class CreateKotDto {
+  /** Client-supplied UUID for offline-first creation. When present, the
+   * server persists this exact id and returns the existing KOT if it was
+   * already created — making a replayed offline order idempotent (no
+   * duplicate tickets / double stock deduction). */
+  @IsOptional()
+  @IsUUID()
+  id?: string;
+
   @IsUUID()
   sessionId: string;
 

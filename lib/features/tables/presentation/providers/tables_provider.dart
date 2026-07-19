@@ -1,53 +1,118 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/constants/api_constants.dart';
 import '../../../../core/network/api_client.dart';
+import '../../../../core/errors/app_exceptions.dart';
+import '../../../../core/offline/connectivity_provider.dart';
+import '../../../../core/offline/offline_cache.dart';
+import '../../../../core/offline/offline_store.dart';
+import '../../../../core/offline/offline_ids.dart';
+import '../../../../core/offline/sync_engine.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
 import '../../domain/entities/table_entities.dart';
 import '../../../orders/presentation/providers/order_provider.dart';
 import '../../../dashboard/presentation/screens/dashboard_screen.dart';
 
 // ─── All tables (by branch) ────────────────────────────────────────────────
+// Cached on success for offline viewing. While offline, cached tables are
+// shown with any table opened offline overlaid as "occupied".
 final tablesStreamProvider = FutureProvider<List<RestaurantTable>>((ref) async {
   final profile = ref.watch(authNotifierProvider).value;
   if (profile?.branchId == null) return [];
+  final branchId = profile!.branchId!;
+  final key = CacheKeys.tables(branchId);
 
-  final response = await ApiClient.instance.get(
-    ApiConstants.tables,
-    queryParameters: {'branchId': profile!.branchId!},
-  );
-  final rows = response.data as List<dynamic>;
-  return rows
-      .map((r) => RestaurantTable.fromJson(r as Map<String, dynamic>))
-      .toList()
-    ..sort((a, b) => a.tableNumber.compareTo(b.tableNumber));
+  List<dynamic> rows;
+  try {
+    final response = await ApiClient.instance.get(
+      ApiConstants.tables,
+      queryParameters: {'branchId': branchId},
+    );
+    rows = response.data as List<dynamic>;
+    await OfflineCache.instance.put(key, rows);
+  } on NetworkException {
+    final cached = await OfflineCache.instance.get(key);
+    if (cached is! List) rethrow;
+    rows = cached;
+  }
+
+  var tables =
+      rows.map((r) => RestaurantTable.fromJson(r as Map<String, dynamic>)).toList();
+
+  // Overlay tables opened offline — their occupied state isn't on the server
+  // yet, so without this a just-opened table would look free again.
+  final offlineSessions = await OfflineCache.instance.allOfflineSessionsByTable();
+  if (offlineSessions.isNotEmpty) {
+    tables = tables.map((t) {
+      final s = offlineSessions[t.id];
+      if (s != null && t.status == TableStatus.available) {
+        return t.copyWith(
+          status: TableStatus.occupied,
+          currentSessionId: s['id'] as String?,
+        );
+      }
+      return t;
+    }).toList();
+  }
+
+  tables.sort((a, b) => a.tableNumber.compareTo(b.tableNumber));
+  return tables;
 });
 
 // ─── Active (open) sessions for the branch ─────────────────────────────────
 final activeSessionsStreamProvider = FutureProvider<List<TableSession>>((ref) async {
   final profile = ref.watch(authNotifierProvider).value;
   if (profile?.branchId == null) return [];
+  final branchId = profile!.branchId!;
+  final key = CacheKeys.openSessions(branchId);
 
-  final response = await ApiClient.instance.get(
-    ApiConstants.sessions,
-    queryParameters: {'branchId': profile!.branchId!, 'status': 'open'},
-  );
-  final rows = response.data as List<dynamic>;
-  return rows
-      .map((r) => TableSession.fromJson(r as Map<String, dynamic>))
-      .toList();
+  var sessions = <TableSession>[];
+  try {
+    final response = await ApiClient.instance.get(
+      ApiConstants.sessions,
+      queryParameters: {'branchId': branchId, 'status': 'open'},
+    );
+    final rows = response.data as List<dynamic>;
+    await OfflineCache.instance.put(key, rows);
+    sessions =
+        rows.map((r) => TableSession.fromJson(r as Map<String, dynamic>)).toList();
+  } on NetworkException {
+    final cached = await OfflineCache.instance.get(key);
+    if (cached is List) {
+      sessions =
+          cached.map((r) => TableSession.fromJson(r as Map<String, dynamic>)).toList();
+    }
+  }
+
+  // Include sessions opened offline that the server hasn't seen yet.
+  final offlineSessions = await OfflineCache.instance.allOfflineSessionsByTable();
+  if (offlineSessions.isNotEmpty) {
+    final ids = sessions.map((s) => s.id).toSet();
+    for (final json in offlineSessions.values) {
+      final s = TableSession.fromJson(json);
+      if (!ids.contains(s.id)) sessions = [...sessions, s];
+    }
+  }
+  return sessions;
 });
 
 // ─── Session for a specific table ─────────────────────────────────────────
 final tableSessionProvider =
     FutureProvider.family<TableSession?, String>((ref, tableId) async {
-  final response =
-      await ApiClient.instance.get(ApiConstants.currentSession(tableId));
-  // The backend sends a body-less response (no Content-Type) when there's
-  // no current session, which Dio decodes as an empty string rather than
-  // null — so check the type, not just `== null`.
-  final data = response.data;
-  if (data is! Map<String, dynamic>) return null;
-  return TableSession.fromJson(data);
+  try {
+    final response =
+        await ApiClient.instance.get(ApiConstants.currentSession(tableId));
+    // The backend sends a body-less response (no Content-Type) when there's
+    // no current session, which Dio decodes as an empty string rather than
+    // null — so check the type, not just `== null`.
+    final data = response.data;
+    if (data is Map<String, dynamic>) return TableSession.fromJson(data);
+    // No server session — but there may be one opened offline on this device.
+    final offline = await OfflineCache.instance.getOfflineSession(tableId);
+    return offline != null ? TableSession.fromJson(offline) : null;
+  } on NetworkException {
+    final offline = await OfflineCache.instance.getOfflineSession(tableId);
+    return offline != null ? TableSession.fromJson(offline) : null;
+  }
 });
 
 // ─── Reservations ───────────────────────────────────────────────────────────
@@ -89,18 +154,66 @@ class TableNotifier extends StateNotifier<AsyncValue<void>> {
   Future<TableSession?> openSession(String tableId,
       {int guestCount = 1, String? notes}) async {
     state = const AsyncValue.loading();
-    try {
-      final response = await ApiClient.instance.post(
-        ApiConstants.openSession(tableId),
-        data: {'guestCount': guestCount},
-      );
-      _invalidateAll(tableId);
-      state = const AsyncValue.data(null);
-      return TableSession.fromJson(response.data as Map<String, dynamic>);
-    } catch (e) {
-      state = AsyncValue.error(e.toString(), StackTrace.current);
-      return null;
+    // Client-generated id, reused offline so a replay is idempotent server-side.
+    final sessionId = newOfflineId();
+
+    if (_ref.read(connectivityProvider)) {
+      try {
+        final response = await ApiClient.instance.post(
+          ApiConstants.openSession(tableId),
+          data: {'id': sessionId, 'guestCount': guestCount},
+        );
+        _invalidateAll(tableId);
+        state = const AsyncValue.data(null);
+        return TableSession.fromJson(response.data as Map<String, dynamic>);
+      } on NetworkException {
+        // Dropped mid-request — open it offline instead.
+      } catch (e) {
+        state = AsyncValue.error(e.toString(), StackTrace.current);
+        return null;
+      }
     }
+
+    return _openSessionOffline(tableId, sessionId, guestCount);
+  }
+
+  /// Opens a table locally and queues the "open" for upload — used when the
+  /// device is offline. Returns a session with a provisional number so the
+  /// waiter can start taking orders straight away.
+  Future<TableSession?> _openSessionOffline(
+      String tableId, String sessionId, int guestCount) async {
+    final profile = _ref.read(authNotifierProvider).value;
+    final now = DateTime.now();
+    // Stored in the exact server JSON shape so TableSession.fromJson works and
+    // the tables list / per-table lookup can both read it back.
+    final sessionJson = <String, dynamic>{
+      'id': sessionId,
+      'table_id': tableId,
+      'branch_id': profile?.branchId ?? '',
+      'session_number': provisionalNumber(sessionId),
+      'status': 'open',
+      'waiter_id': profile?.id,
+      'waiter_name': profile?.fullName,
+      'guest_count': guestCount,
+      'total_amount': 0,
+      'opened_at': now.toIso8601String(),
+      'bill_requested': false,
+      'on_hold': false,
+    };
+
+    await OfflineCache.instance.putOfflineSession(tableId, sessionJson);
+    await OfflineStore.instance.enqueue(
+      entityType: 'session',
+      operation: 'create',
+      endpoint: ApiConstants.openSession(tableId),
+      method: 'POST',
+      payload: {'id': sessionId, 'guestCount': guestCount},
+    );
+    await _ref.read(pendingSyncProvider.notifier).refresh();
+
+    _invalidateAll(tableId);
+    state = const AsyncValue.data(null);
+    return TableSession.fromJson(sessionJson);
   }
 
   // ── Request Bill ────────────────────────────────────────────────────────

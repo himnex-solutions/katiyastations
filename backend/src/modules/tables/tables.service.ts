@@ -74,6 +74,15 @@ export class TablesService {
   }
 
   async openSession(tableId: string, currentUser: CurrentUserPayload, dto: OpenSessionDto) {
+    // Idempotent replay: an offline-created session carries its own id. If it
+    // already landed (e.g. a retried sync after a flaky connection), return it
+    // as-is instead of creating a duplicate or tripping the "already open"
+    // guard below (which the session itself would otherwise trip).
+    if (dto.id) {
+      const existing = await this.prisma.tableSession.findUnique({ where: { id: dto.id } });
+      if (existing) return existing;
+    }
+
     const table = await this.findOne(tableId);
 
     if (table.status === 'occupied' && table.currentSessionId) {
@@ -85,6 +94,7 @@ export class TablesService {
     const session = await this.prisma.$transaction(async (tx) => {
       const created = await tx.tableSession.create({
         data: {
+          id: dto.id, // undefined → Prisma applies @default(uuid())
           tableId: table.id,
           branchId: table.branchId,
           sessionNumber: generateSequenceNumber('SESS'),

@@ -1,4 +1,4 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Post, Req } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, HttpStatus, Post, Req, UseGuards } from '@nestjs/common';
 import { Request } from 'express';
 import { AuthService, RequestMeta } from './auth.service';
 import { LoginDto } from './dto/login.dto';
@@ -9,6 +9,7 @@ import { ResetPasswordDto } from './dto/reset-password.dto';
 import { Public } from '../../common/decorators/public.decorator';
 import { RawResponse } from '../../common/decorators/raw-response.decorator';
 import { CurrentUser, CurrentUserPayload } from '../../common/decorators/current-user.decorator';
+import { LoginThrottleGuard } from '../../common/guards/login-throttle.guard';
 
 function requestMeta(req: Request): RequestMeta {
   const userAgent = req.headers['user-agent'];
@@ -24,6 +25,7 @@ export class AuthController {
 
   @Public()
   @RawResponse()
+  @UseGuards(LoginThrottleGuard) // 5 attempts/min per account — brute-force protection
   @Post('login')
   @HttpCode(HttpStatus.OK)
   login(@Body() dto: LoginDto, @Req() req: Request) {

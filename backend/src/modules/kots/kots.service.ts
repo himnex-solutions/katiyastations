@@ -77,6 +77,14 @@ export class KotsService {
   }
 
   async create(currentUser: CurrentUserPayload, dto: CreateKotDto) {
+    // Idempotent replay for offline-queued orders: an offline KOT carries its
+    // own id. If a retried sync delivers it twice, return the one already
+    // stored rather than creating a second ticket (and double-deducting stock).
+    if (dto.id) {
+      const existing = await this.prisma.kot.findUnique({ where: { id: dto.id }, include: KOT_INCLUDE });
+      if (existing) return toKotResponse(existing);
+    }
+
     const session = await this.prisma.tableSession.findUnique({ where: { id: dto.sessionId } });
     if (!session) throw new NotFoundException('Session not found');
 
@@ -87,6 +95,7 @@ export class KotsService {
 
     const kot = await this.prisma.kot.create({
       data: {
+        id: dto.id, // undefined → Prisma applies @default(uuid())
         sessionId: session.id,
         branchId: session.branchId,
         tableId: session.tableId,

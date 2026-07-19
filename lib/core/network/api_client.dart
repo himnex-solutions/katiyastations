@@ -285,7 +285,17 @@ class _JwtInterceptor extends QueuedInterceptorsWrapper {
     }
 
     _refreshFuture ??= _refreshToken();
-    final newAccessToken = await _refreshFuture;
+    String? newAccessToken;
+    try {
+      newAccessToken = await _refreshFuture;
+    } on NetworkException {
+      // Can't reach the server to refresh — we don't know whether the session
+      // is still valid, so keep the user signed in (offline mode depends on
+      // this) and let the request fail through to its caller's offline path.
+      _refreshFuture = null;
+      handler.next(err);
+      return;
+    }
     _refreshFuture = null;
 
     if (newAccessToken == null) {
@@ -326,8 +336,21 @@ class _JwtInterceptor extends QueuedInterceptorsWrapper {
         }
         return accessToken;
       }
-    } catch (_) {}
-    return null;
+      return null;
+    } on DioException catch (e) {
+      // A network failure (offline / server unreachable) is NOT an auth
+      // failure — signal it distinctly so onError keeps the session instead of
+      // logging the user out. A real 4xx from /refresh still means logout.
+      if (e.type == DioExceptionType.connectionError ||
+          e.type == DioExceptionType.connectionTimeout ||
+          e.type == DioExceptionType.sendTimeout ||
+          e.type == DioExceptionType.receiveTimeout) {
+        throw const NetworkException();
+      }
+      return null;
+    } catch (_) {
+      return null;
+    }
   }
 }
 
