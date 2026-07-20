@@ -134,6 +134,13 @@ final realtimeSyncProvider = Provider<void>((ref) {
     socket.onWaiterAssigned().listen((_) => invalidateTablesAndSessions()),
     socket.onBillGenerated().listen((_) => invalidateBilling()),
     socket.on(SocketEvents.billPaid).listen((_) => invalidateBilling()),
+    // A void/refund flips the bill's status and restocks ingredients + bar
+    // pegs, so refresh the money views and both stock surfaces everywhere.
+    socket.on(SocketEvents.billRefunded).listen((_) {
+      invalidateBilling();
+      ref.invalidate(inventoryProvider);
+      ref.invalidate(barStockProvider);
+    }),
     socket.onNotification().listen((_) => ref.invalidate(notificationsProvider)),
     socket.onLowStock().listen((data) {
       ref.invalidate(inventoryProvider);
@@ -177,7 +184,11 @@ void _showLowStockToast(Ref ref, Map<String, dynamic> data) {
   if (role == null || !audience.contains(role)) return;
 
   final name = (data['name'] ?? data['item_name'] ?? 'An item').toString();
-  final rawQty = data['currentStock'] ?? data['current_stock'];
+  // Inventory items report current_stock; bar bottles report current_bottles.
+  final rawQty = data['currentStock'] ??
+      data['current_stock'] ??
+      data['currentBottles'] ??
+      data['current_bottles'];
   final qty = rawQty is num ? rawQty : num.tryParse('$rawQty');
   final isOut = qty != null && qty <= 0;
   final message = isOut

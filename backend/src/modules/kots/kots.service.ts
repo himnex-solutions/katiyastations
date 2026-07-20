@@ -450,6 +450,15 @@ export class KotsService {
 
       if (direction === 'out' && Number(updated.currentBottles) <= 1) {
         this.realtime.lowStock(branchId, updated);
+        // Persist a bell + FCM alert, mirroring the inventory low-stock path.
+        // A bar bottle has no reorderLevel column, so 1 bottle is the threshold.
+        await this.notifications.lowStock({
+          branchId,
+          name: updated.name,
+          unit: 'bottles',
+          currentStock: updated.currentBottles,
+          reorderLevel: 1,
+        });
       }
     }
   }

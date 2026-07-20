@@ -32,6 +32,7 @@ class SocketEvents {
   // Billing events
   static const String billGenerated = 'bill:generated';
   static const String billPaid = 'bill:paid';
+  static const String billRefunded = 'bill:refunded';
 
   // Inventory events
   static const String inventoryLowStock = 'inventory:low_stock';
@@ -262,6 +263,7 @@ class SocketClient {
     SocketEvents.orderItemCancelled,
     SocketEvents.billGenerated,
     SocketEvents.billPaid,
+    SocketEvents.billRefunded,
     SocketEvents.inventoryLowStock,
     SocketEvents.notificationNew,
     SocketEvents.shiftClosed,
