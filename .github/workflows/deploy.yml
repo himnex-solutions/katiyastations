@@ -17,17 +17,24 @@ jobs:
         working-directory: backend
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout Repository
+        uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: npm
           cache-dependency-path: backend/package-lock.json
 
-      - run: npm ci
-      - run: npx prisma generate
-      - run: npm run build
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Generate Prisma Client
+        run: npx prisma generate
+
+      - name: Build Project
+        run: npm run build
 
   deploy:
     needs: build
@@ -42,23 +49,45 @@ jobs:
           password: ${{ secrets.VPS_PASSWORD }}
           port: 22
           script: |
+            set -e
+
             cd ~/katiyastation/katiyastations/backend
 
+            echo "========================================"
             echo "Pulling latest code..."
+            echo "========================================"
             git pull origin main
 
-            echo "Installing packages..."
-            npm install
+            echo "========================================"
+            echo "Installing dependencies..."
+            echo "========================================"
+            npm ci
 
-            echo "Generating Prisma..."
+            echo "========================================"
+            echo "Generating Prisma Client..."
+            echo "========================================"
             npx prisma generate
 
-            echo "Running migrations..."
+            echo "========================================"
+            echo "Running Prisma Migrations..."
+            echo "========================================"
             npx prisma migrate deploy
 
-            echo "Restarting backend..."
-            pm2 restart katiya-api
+            echo "========================================"
+            echo "Building Backend..."
+            echo "========================================"
+            npm run build
 
+            echo "========================================"
+            echo "Restarting PM2..."
+            echo "========================================"
+            pm2 restart katiya-api --update-env
+
+            echo "========================================"
+            echo "Saving PM2..."
+            echo "========================================"
             pm2 save
 
-            echo "Deployment completed!"
+            echo "========================================"
+            echo "Deployment Successful!"
+            echo "========================================"
