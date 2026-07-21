@@ -53,26 +53,32 @@ jobs:
 
             cd ~/katiyastation/katiyastations/backend
 
-            echo "===== Updating Source Code ====="
+            echo "===== Updating Code ====="
             git fetch origin
             git reset --hard origin/main
 
-            echo "===== Installing Dependencies ====="
+            echo "===== Installing Packages ====="
             npm ci
 
-            echo "===== Generating Prisma Client ====="
+            echo "===== Prisma Generate ====="
             npx prisma generate
 
-            echo "===== Building Application ====="
+            echo "===== Build ====="
             npm run build
 
-            echo "===== Running Database Migrations ====="
+            echo "===== Prisma Migration ====="
             npx prisma migrate deploy
 
-            echo "===== Restarting PM2 ====="
-            pm2 restart katiya-api --update-env
+            echo "===== Restart PM2 ====="
 
-            echo "===== Saving PM2 Process List ====="
+            if pm2 describe katiya-api > /dev/null; then
+              pm2 delete katiya-api
+            fi
+
+            pm2 start dist/src/main.js \
+              --name katiya-api \
+              --update-env
+
             pm2 save
 
-            echo "===== Deployment Completed Successfully ====="
+            echo "===== Deployment Successful ====="
