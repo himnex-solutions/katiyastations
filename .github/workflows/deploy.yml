@@ -17,17 +17,24 @@ jobs:
         working-directory: backend
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout Repository
+        uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: npm
           cache-dependency-path: backend/package-lock.json
 
-      - run: npm ci
-      - run: npx prisma generate
-      - run: npm run build
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Generate Prisma Client
+        run: npx prisma generate
+
+      - name: Build Application
+        run: npm run build
 
   deploy:
     needs: build
@@ -42,26 +49,30 @@ jobs:
           password: ${{ secrets.VPS_PASSWORD }}
           port: 22
           script: |
+            set -e
+
             cd ~/katiyastation/katiyastations/backend
 
-            echo "Pulling latest code..."
-            git pull origin main
+            echo "===== Updating Source Code ====="
+            git fetch origin
+            git reset --hard origin/main
 
-            echo "Installing packages..."
+            echo "===== Installing Dependencies ====="
             npm ci
 
-            echo "Generating Prisma Client..."
+            echo "===== Generating Prisma Client ====="
             npx prisma generate
 
-            echo "Building application..."
+            echo "===== Building Application ====="
             npm run build
 
-            echo "Running database migrations..."
+            echo "===== Running Database Migrations ====="
             npx prisma migrate deploy
 
-            echo "Restarting backend..."
+            echo "===== Restarting PM2 ====="
             pm2 restart katiya-api --update-env
 
+            echo "===== Saving PM2 Process List ====="
             pm2 save
 
-            echo "Deployment completed!"
+            echo "===== Deployment Completed Successfully ====="
