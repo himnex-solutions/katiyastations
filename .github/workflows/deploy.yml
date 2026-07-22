@@ -8,9 +8,16 @@ on:
       - "backend/**"
       - ".github/workflows/deploy.yml"
 
+# Never let two deploys run at once: a second push mid-deploy would git-reset
+# and rebuild underneath the first. Queue them instead of overlapping.
+concurrency:
+  group: deploy-backend
+  cancel-in-progress: false
+
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
 
     defaults:
       run:
@@ -39,6 +46,7 @@ jobs:
   deploy:
     needs: build
     runs-on: ubuntu-latest
+    timeout-minutes: 15
 
     steps:
       - name: Deploy to VPS
@@ -48,8 +56,9 @@ jobs:
           username: katiyarms
           password: ${{ secrets.VPS_PASSWORD }}
           port: 22
+          command_timeout: 15m
           script: |
-            set -e
+            set -eo pipefail
 
             cd ~/katiyastation/katiyastations/backend
 
@@ -72,6 +81,23 @@ jobs:
             echo "===== Starting / Reloading PM2 ====="
             pm2 startOrReload ecosystem.config.js --update-env
 
+            echo "===== Health Check ====="
+            # Give Nest a moment to bind the port, then confirm it actually
+            # answers. Any HTTP status means it is up and routing; 000 means the
+            # process died on boot — fail the deploy loudly and show the logs so
+            # a crash-looping build can never be reported as a green deploy.
+            sleep 6
+            code=$(curl -s -o /dev/null -w "%{http_code}" -m 5 \
+              http://localhost:3000/api/v1/branches || echo 000)
+            if [ "$code" = "000" ]; then
+              echo "API did not respond on :3000 after reload"
+              pm2 logs katiya-api --lines 60 --nostream || true
+              exit 1
+            fi
+            echo "API responded (HTTP $code)"
+
+            # Only freeze the process list once we know it is healthy, so a
+            # broken deploy is never the state that gets resurrected on reboot.
             echo "===== Saving PM2 ====="
             pm2 save
 
