@@ -5,8 +5,8 @@ on:
     branches:
       - main
     paths:
-      - 'backend/**'
-      - '.github/workflows/deploy.yml'
+      - "backend/**"
+      - ".github/workflows/deploy.yml"
 
 jobs:
   build:
@@ -57,28 +57,22 @@ jobs:
             git fetch origin
             git reset --hard origin/main
 
-            echo "===== Installing Packages ====="
+            echo "===== Installing Dependencies ====="
             npm ci
 
-            echo "===== Prisma Generate ====="
+            echo "===== Generating Prisma Client ====="
             npx prisma generate
 
-            echo "===== Build ====="
+            echo "===== Building Backend ====="
             npm run build
 
-            echo "===== Prisma Migration ====="
+            echo "===== Running Prisma Migrations ====="
             npx prisma migrate deploy
 
-            echo "===== Restart PM2 ====="
+            echo "===== Starting / Reloading PM2 ====="
+            pm2 startOrReload ecosystem.config.js --update-env
 
-            if pm2 describe katiya-api > /dev/null; then
-              pm2 delete katiya-api
-            fi
-
-            pm2 start dist/src/main.js \
-              --name katiya-api \
-              --update-env
-
+            echo "===== Saving PM2 ====="
             pm2 save
 
-            echo "===== Deployment Successful ====="
+            echo "===== Deployment Completed Successfully ====="
