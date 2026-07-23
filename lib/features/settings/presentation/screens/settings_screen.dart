@@ -118,7 +118,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(color: AppColors.card, borderRadius: BorderRadius.circular(12), border: Border.all(color: AppColors.border)),
               child: const Column(children: [
-                _InfoRow('App Version', '1.0.0'),
+                _InfoRow('App Version', '1.2.0'),
                 Divider(),
                 _InfoRow('Local Cache Status', 'Ready'),
               ]),
