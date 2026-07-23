@@ -227,6 +227,7 @@ model KotItem {
   name       String
   quantity   Int
   unitPrice  Decimal  @default(0.0) @map("unit_price")
+  type       String   @default("food") // food | drink | bar — routes the ticket: kitchen vs bar printer
   status     String   @default("pending") // pending | preparing | ready | served | cancelled
   note       String?
   createdAt  DateTime @default(now()) @map("created_at")
