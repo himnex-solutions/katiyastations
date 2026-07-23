@@ -100,6 +100,9 @@ class PrinterConfig {
   final bool isBle;
   final int paperMm; // 58 or 80
   final bool autoPrintKot;
+  /// Receipt printer only: auto-print the bar/drink items of every KOT here
+  /// (the cashier's "bar station" — see bar_auto_print.dart).
+  final bool autoPrintBarKot;
   final bool configured;
 
   const PrinterConfig({
@@ -112,6 +115,7 @@ class PrinterConfig {
     this.isBle = false,
     this.paperMm = 80,
     this.autoPrintKot = false,
+    this.autoPrintBarKot = false,
     this.configured = false,
   });
 
@@ -125,6 +129,7 @@ class PrinterConfig {
     bool? isBle,
     int? paperMm,
     bool? autoPrintKot,
+    bool? autoPrintBarKot,
     bool? configured,
   }) {
     return PrinterConfig(
@@ -137,6 +142,7 @@ class PrinterConfig {
       isBle: isBle ?? this.isBle,
       paperMm: paperMm ?? this.paperMm,
       autoPrintKot: autoPrintKot ?? this.autoPrintKot,
+      autoPrintBarKot: autoPrintBarKot ?? this.autoPrintBarKot,
       configured: configured ?? this.configured,
     );
   }
@@ -163,6 +169,7 @@ class PrinterConfig {
         'isBle': isBle,
         'paperMm': paperMm,
         'autoPrintKot': autoPrintKot,
+        'autoPrintBarKot': autoPrintBarKot,
         'configured': configured,
       };
 }
@@ -191,6 +198,7 @@ class PrinterConfigNotifier extends StateNotifier<PrinterConfig> {
       isBle: prefs.getBool('$_key.isBle') ?? false,
       paperMm: prefs.getInt('$_key.paperMm') ?? 80,
       autoPrintKot: prefs.getBool('$_key.autoPrintKot') ?? false,
+      autoPrintBarKot: prefs.getBool('$_key.autoPrintBarKot') ?? false,
       configured: prefs.getBool('$_key.configured') ?? false,
     );
   }
@@ -208,10 +216,12 @@ class PrinterConfigNotifier extends StateNotifier<PrinterConfig> {
     await prefs.setBool('$_key.isBle', m['isBle'] as bool);
     await prefs.setInt('$_key.paperMm', m['paperMm'] as int);
     await prefs.setBool('$_key.autoPrintKot', m['autoPrintKot'] as bool);
+    await prefs.setBool('$_key.autoPrintBarKot', m['autoPrintBarKot'] as bool);
     await prefs.setBool('$_key.configured', m['configured'] as bool);
   }
 
   Future<void> setAutoPrint(bool value) => save(state.copyWith(autoPrintKot: value));
+  Future<void> setAutoPrintBar(bool value) => save(state.copyWith(autoPrintBarKot: value));
 }
 
 /// The till's receipt / bill printer — typically a USB printer at the cashier.

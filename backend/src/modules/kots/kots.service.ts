@@ -92,6 +92,10 @@ export class KotsService {
       where: { id: { in: dto.items.map((i) => i.menuItemId) } },
     });
     const priceById = new Map(menuItems.map((m) => [m.id, m.price]));
+    // Carry each item's station type (food | drink | bar) onto the KOT item, so
+    // the client can route the ticket — food to the kitchen printer, bar/drink
+    // to the cashier's bar printer. Without this every item defaulted to 'food'.
+    const typeById = new Map(menuItems.map((m) => [m.id, m.type]));
 
     const kot = await this.prisma.kot.create({
       data: {
@@ -108,6 +112,7 @@ export class KotsService {
             name: item.name,
             quantity: item.quantity,
             unitPrice: priceById.get(item.menuItemId) ?? 0,
+            type: typeById.get(item.menuItemId) ?? 'food',
             note: item.note,
           })),
         },

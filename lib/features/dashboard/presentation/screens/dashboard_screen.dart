@@ -8,6 +8,7 @@ import '../../../../core/constants/app_colors.dart';
 import '../../../../core/constants/app_constants.dart';
 import '../../../../core/constants/api_constants.dart';
 import '../../../../core/network/api_client.dart';
+import '../../../../core/offline/connectivity_provider.dart';
 import '../../../../core/utils/responsive_utils.dart';
 import '../../../../core/widgets/notification_bell.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
@@ -18,6 +19,9 @@ import '../../../kitchen/presentation/providers/kitchen_provider.dart';
 final dashboardBillsProvider = FutureProvider<List<Map<String, dynamic>>>((ref) async {
   final profile = ref.watch(authNotifierProvider).value;
   if (profile?.branchId == null) return [];
+  // Offline: the dashboard's live figures need the server — return empty at
+  // once rather than hanging the landing screen on a call that will time out.
+  if (!ref.read(connectivityProvider)) return const [];
   final today = DateFormat('yyyy-MM-dd').format(DateTime.now());
   final response = await ApiClient.instance.get(
     ApiConstants.bills,
@@ -31,6 +35,9 @@ final dashboardBillsProvider = FutureProvider<List<Map<String, dynamic>>>((ref) 
 final dashboardExpensesProvider = FutureProvider<List<Map<String, dynamic>>>((ref) async {
   final profile = ref.watch(authNotifierProvider).value;
   if (profile?.branchId == null) return [];
+  // Offline: the dashboard's live figures need the server — return empty at
+  // once rather than hanging the landing screen on a call that will time out.
+  if (!ref.read(connectivityProvider)) return const [];
   final today = DateFormat('yyyy-MM-dd').format(DateTime.now());
   final response = await ApiClient.instance.get(
     ApiConstants.expenses,
@@ -44,6 +51,9 @@ final dashboardExpensesProvider = FutureProvider<List<Map<String, dynamic>>>((re
 final dashboardKotsProvider = FutureProvider<List<Map<String, dynamic>>>((ref) async {
   final profile = ref.watch(authNotifierProvider).value;
   if (profile?.branchId == null) return [];
+  // Offline: the dashboard's live figures need the server — return empty at
+  // once rather than hanging the landing screen on a call that will time out.
+  if (!ref.read(connectivityProvider)) return const [];
   final response = await ApiClient.instance.get(
     ApiConstants.kots,
     queryParameters: {'branchId': profile!.branchId!, 'status': 'pending', 'limit': '100'},
@@ -55,6 +65,9 @@ final dashboardKotsProvider = FutureProvider<List<Map<String, dynamic>>>((ref) a
 final dashboardCreditProvider = FutureProvider<List<Map<String, dynamic>>>((ref) async {
   final profile = ref.watch(authNotifierProvider).value;
   if (profile?.branchId == null) return [];
+  // Offline: the dashboard's live figures need the server — return empty at
+  // once rather than hanging the landing screen on a call that will time out.
+  if (!ref.read(connectivityProvider)) return const [];
   final response = await ApiClient.instance.get(
     ApiConstants.credits,
     queryParameters: {'branchId': profile!.branchId!, 'limit': '100'},
@@ -459,6 +472,9 @@ class _KitchenQuickNav extends StatelessWidget {
 final dashboardSessionsProvider = FutureProvider<List<Map<String, dynamic>>>((ref) async {
   final profile = ref.watch(authNotifierProvider).value;
   if (profile?.branchId == null) return [];
+  // Offline: the dashboard's live figures need the server — return empty at
+  // once rather than hanging the landing screen on a call that will time out.
+  if (!ref.read(connectivityProvider)) return const [];
   final response = await ApiClient.instance.get(
     ApiConstants.sessions,
     queryParameters: {'branchId': profile!.branchId!, 'status': 'open'},

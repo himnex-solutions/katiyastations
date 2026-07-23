@@ -94,6 +94,14 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               statusProvider: receiptPrinterStatusProvider,
               emptyTitle: 'No receipt printer set up',
               emptyHint: 'Tap “Set up” to connect the bill printer (USB at the till).',
+              barAutoPrint: (
+                title: 'Auto-print bar orders to this printer',
+                subtitle:
+                    'Turn on for order-taking devices. Set this printer to the '
+                    'cashier printer’s IP: bar & drink items print straight to it '
+                    'over the LAN when you send — no internet. Food goes to the '
+                    'kitchen printer.',
+              ),
             ),
             const SizedBox(height: 24),
             const _SectionHeader('Kitchen (KOT) Printer'),
@@ -184,12 +192,18 @@ class _PrinterSettingsCard extends ConsumerStatefulWidget {
   /// the kitchen printer offers it; the receipt printer prints on demand.
   final ({String title, String subtitle})? autoPrint;
 
+  /// When set, shows the "auto-print bar orders" toggle (receipt printer only):
+  /// this device becomes the cashier bar station and prints the bar/drink items
+  /// of every KOT here.
+  final ({String title, String subtitle})? barAutoPrint;
+
   const _PrinterSettingsCard({
     required this.configProvider,
     required this.statusProvider,
     required this.emptyTitle,
     required this.emptyHint,
     this.autoPrint,
+    this.barAutoPrint,
   });
 
   @override
@@ -326,6 +340,26 @@ class _PrinterSettingsCardState extends ConsumerState<_PrinterSettingsCard> {
                 style: GoogleFonts.outfit(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
             subtitle: Text(
               widget.autoPrint!.subtitle,
+              style: GoogleFonts.outfit(fontSize: 11, color: AppColors.textSecondary, height: 1.3),
+            ),
+          ),
+        ],
+
+        // Bar auto-print toggle — receipt printer only. Makes this the cashier
+        // bar station: bar/drink items of every KOT print here.
+        if (widget.barAutoPrint != null) ...[
+          const Divider(height: 28),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            thumbColor: const WidgetStatePropertyAll(AppColors.primary),
+            value: cfg.autoPrintBarKot,
+            onChanged: (supported && cfg.configured)
+                ? (v) => ref.read(widget.configProvider.notifier).setAutoPrintBar(v)
+                : null,
+            title: Text(widget.barAutoPrint!.title,
+                style: GoogleFonts.outfit(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+            subtitle: Text(
+              widget.barAutoPrint!.subtitle,
               style: GoogleFonts.outfit(fontSize: 11, color: AppColors.textSecondary, height: 1.3),
             ),
           ),

@@ -93,6 +93,7 @@ class KotItem extends Equatable {
   final double unitPrice;
   final String? notes;
   final String status; // pending | preparing | ready | served | cancelled | returned
+  final String type; // food | drink | bar — routes the ticket (kitchen vs bar)
 
   const KotItem({
     required this.id,
@@ -103,7 +104,12 @@ class KotItem extends Equatable {
     this.unitPrice = 0.0,
     this.notes,
     this.status = 'pending',
+    this.type = 'food',
   });
+
+  /// True for bar/drink items — these route to the cashier's bar printer
+  /// instead of the kitchen KOT printer.
+  bool get isBar => type == 'bar' || type == 'drink';
 
   factory KotItem.fromJson(Map<String, dynamic> json) {
     return KotItem(
@@ -115,6 +121,7 @@ class KotItem extends Equatable {
       unitPrice: (json['unit_price'] as num?)?.toDouble() ?? 0.0,
       notes: json['note'] as String? ?? json['notes'] as String?,
       status: json['status'] as String? ?? 'pending',
+      type: json['type'] as String? ?? 'food',
     );
   }
 

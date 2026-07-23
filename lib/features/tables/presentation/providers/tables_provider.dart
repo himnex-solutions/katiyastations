@@ -22,17 +22,24 @@ final tablesStreamProvider = FutureProvider<List<RestaurantTable>>((ref) async {
   final key = CacheKeys.tables(branchId);
 
   List<dynamic> rows;
-  try {
-    final response = await ApiClient.instance.get(
-      ApiConstants.tables,
-      queryParameters: {'branchId': branchId},
-    );
-    rows = response.data as List<dynamic>;
-    await OfflineCache.instance.put(key, rows);
-  } on NetworkException {
+  if (!ref.read(connectivityProvider)) {
+    // Offline: serve the cached tables instantly instead of waiting for a
+    // network call to time out first.
     final cached = await OfflineCache.instance.get(key);
-    if (cached is! List) rethrow;
-    rows = cached;
+    rows = cached is List ? cached : const <dynamic>[];
+  } else {
+    try {
+      final response = await ApiClient.instance.get(
+        ApiConstants.tables,
+        queryParameters: {'branchId': branchId},
+      );
+      rows = response.data as List<dynamic>;
+      await OfflineCache.instance.put(key, rows);
+    } on NetworkException {
+      final cached = await OfflineCache.instance.get(key);
+      if (cached is! List) rethrow;
+      rows = cached;
+    }
   }
 
   var tables =
@@ -66,22 +73,27 @@ final activeSessionsStreamProvider = FutureProvider<List<TableSession>>((ref) as
   final key = CacheKeys.openSessions(branchId);
 
   var sessions = <TableSession>[];
-  try {
-    final response = await ApiClient.instance.get(
-      ApiConstants.sessions,
-      queryParameters: {'branchId': branchId, 'status': 'open'},
-    );
-    final rows = response.data as List<dynamic>;
-    await OfflineCache.instance.put(key, rows);
-    sessions =
-        rows.map((r) => TableSession.fromJson(r as Map<String, dynamic>)).toList();
-  } on NetworkException {
+  List<dynamic>? cachedRows;
+  if (!ref.read(connectivityProvider)) {
+    // Offline: read the cache straight away, no network round-trip.
     final cached = await OfflineCache.instance.get(key);
-    if (cached is List) {
-      sessions =
-          cached.map((r) => TableSession.fromJson(r as Map<String, dynamic>)).toList();
+    cachedRows = cached is List ? cached : const <dynamic>[];
+  } else {
+    try {
+      final response = await ApiClient.instance.get(
+        ApiConstants.sessions,
+        queryParameters: {'branchId': branchId, 'status': 'open'},
+      );
+      cachedRows = response.data as List<dynamic>;
+      await OfflineCache.instance.put(key, cachedRows);
+    } on NetworkException {
+      final cached = await OfflineCache.instance.get(key);
+      cachedRows = cached is List ? cached : const <dynamic>[];
     }
   }
+  sessions = cachedRows
+      .map((r) => TableSession.fromJson(r as Map<String, dynamic>))
+      .toList();
 
   // Include sessions opened offline that the server hasn't seen yet.
   final offlineSessions = await OfflineCache.instance.allOfflineSessionsByTable();
@@ -98,6 +110,12 @@ final activeSessionsStreamProvider = FutureProvider<List<TableSession>>((ref) as
 // ─── Session for a specific table ─────────────────────────────────────────
 final tableSessionProvider =
     FutureProvider.family<TableSession?, String>((ref, tableId) async {
+  // Offline: only a session opened on this device is known — return it at once
+  // rather than stalling on a network call that will time out.
+  if (!ref.read(connectivityProvider)) {
+    final offline = await OfflineCache.instance.getOfflineSession(tableId);
+    return offline != null ? TableSession.fromJson(offline) : null;
+  }
   try {
     final response =
         await ApiClient.instance.get(ApiConstants.currentSession(tableId));

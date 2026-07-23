@@ -142,15 +142,19 @@ final sessionKotsProvider =
     FutureProvider.family<List<KotWithItems>, String>((ref, sessionId) async {
   if (sessionId.isEmpty) return [];
   var serverKots = <KotWithItems>[];
-  try {
-    final response =
-        await ApiClient.instance.get(ApiConstants.kotsBySession(sessionId));
-    final rows = response.data as List<dynamic>;
-    serverKots = rows
-        .map((r) => _kotWithItemsFromJson(r as Map<String, dynamic>))
-        .toList();
-  } on NetworkException {
-    // Offline — fall through to locally-stored orders only.
+  // Offline: skip the server call entirely (no 5s stall) and show the orders
+  // stored locally on this device.
+  if (ref.read(connectivityProvider)) {
+    try {
+      final response =
+          await ApiClient.instance.get(ApiConstants.kotsBySession(sessionId));
+      final rows = response.data as List<dynamic>;
+      serverKots = rows
+          .map((r) => _kotWithItemsFromJson(r as Map<String, dynamic>))
+          .toList();
+    } on NetworkException {
+      // Dropped mid-request — fall through to locally-stored orders only.
+    }
   }
   final offline = await _offlineKotsFor(sessionId);
   if (offline.isEmpty) return serverKots;
@@ -185,8 +189,9 @@ class SessionOrderState {
 
   bool get hasOrders => liveCount > 0;
 
-  /// The food is all out — the guest can be billed.
-  bool get canRequestBill => !isLoading && liveCount > 0 && unservedCount == 0;
+  /// The waiter may request the bill any time once at least one order has been
+  /// sent — no need to wait for the kitchen to serve everything first.
+  bool get canRequestBill => !isLoading && liveCount > 0;
 
   /// Nothing was ever ordered — the table can be released without a bill.
   bool get canFreeTable => !isLoading && liveCount == 0;
@@ -196,9 +201,7 @@ class SessionOrderState {
   String? get billBlockedReason {
     if (canRequestBill) return null;
     if (isLoading) return 'Checking orders…';
-    if (liveCount == 0) return 'Nothing ordered yet — use Close & Free Table';
-    final s = unservedCount == 1 ? '' : 's';
-    return 'Waiting on the kitchen — $unservedCount order$s not served yet';
+    return 'Nothing ordered yet — use Close & Free Table';
   }
 
   /// Why the table can't be freed, or null when it can.
@@ -211,8 +214,8 @@ class SessionOrderState {
 
 /// Live view of [sessionKotsProvider]. The realtime layer invalidates that
 /// provider on every `kot:new` and `kot:status_changed`, so a waiter watching
-/// this sees "Request Bill" unlock the instant the kitchen marks the last
-/// order served — no refresh, no reopening the dialog.
+/// this sees "Request Bill" unlock the instant the first order is sent — the
+/// bill no longer waits on the kitchen serving everything.
 final sessionOrderStateProvider =
     Provider.family<SessionOrderState, String>((ref, sessionId) {
   final kots = ref.watch(sessionKotsProvider(sessionId)).valueOrNull;
@@ -428,17 +431,22 @@ class OrderNotifier extends StateNotifier<List<CartItem>> {
       status: 'pending',
       waiterId: waiterId,
       waiterName: waiterName,
-      items: offlineItems
-          .map((i) => KotItem(
-                id: i.id,
-                kotId: kotId,
-                menuItemId: i.menuItemId,
-                menuItemName: i.menuItemName,
-                quantity: i.quantity,
-                unitPrice: i.unitPrice,
-                notes: i.notes,
-              ))
-          .toList(),
+      // offlineItems is built from `cart` in order, so index-pair them to carry
+      // each item's station type (kitchen vs bar) onto the returned KOT — the
+      // waiter device needs it to print food-only to the kitchen while offline.
+      items: List.generate(offlineItems.length, (i) {
+        final oi = offlineItems[i];
+        return KotItem(
+          id: oi.id,
+          kotId: kotId,
+          menuItemId: oi.menuItemId,
+          menuItemName: oi.menuItemName,
+          quantity: oi.quantity,
+          unitPrice: oi.unitPrice,
+          notes: oi.notes,
+          type: cart[i].item.type,
+        );
+      }),
       createdAt: now,
       notes: notes,
     );

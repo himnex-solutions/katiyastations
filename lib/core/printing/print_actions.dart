@@ -117,18 +117,62 @@ Future<void> autoPrintKotToKitchen(
   if (!thermalPrinter.supported) return;
   final cfg = ref.read(kotPrinterConfigProvider);
   if (!cfg.configured || !cfg.autoPrintKot) return;
-  await thermalPrinter.printKotTicket(config: cfg, kot: _kotPayload(kot, tableNumber));
+
+  // Only kitchen (food) items belong on the kitchen ticket; bar/drink items are
+  // printed at the cashier's bar printer instead. Skip if there's no food.
+  final foodItems = kot.items.where((i) => !i.isBar).toList();
+  if (foodItems.isEmpty) return;
+
+  await thermalPrinter.printKotTicket(
+    config: cfg,
+    kot: _kotPayload(kot, tableNumber, foodItems),
+  );
 }
 
-/// Shapes a [Kot] into the map [ThermalPrinter.printKotTicket] reads. Mirrors
-/// the socket `kot:new` payload (camelCase, `items[].name/quantity/note`).
-Map<String, dynamic> _kotPayload(Kot kot, String? tableNumber) => {
+/// Prints the BAR & DRINK items of [kot] straight to this device's receipt
+/// printer over the LAN, the moment a waiter sends the order — a direct socket
+/// to the printer's IP, so it needs no internet (same model as the kitchen
+/// print). The receipt printer is the cashier's LAN printer.
+///
+/// No-op when this device has no receipt printer set up, "auto-print bar
+/// orders" is off, the order has no bar/drink items, or on web. Throws when the
+/// printer is configured but unreachable so the caller can tell the waiter.
+Future<void> autoPrintBarToCashier(
+  WidgetRef ref, {
+  required Kot kot,
+  String? tableNumber,
+}) async {
+  if (!thermalPrinter.supported) return;
+  final cfg = ref.read(receiptPrinterConfigProvider);
+  if (!cfg.configured || !cfg.autoPrintBarKot) return;
+
+  final barItems = kot.items.where((i) => i.isBar).toList();
+  if (barItems.isEmpty) return;
+
+  await thermalPrinter.printKotTicket(
+    config: cfg,
+    kot: _kotPayload(kot, tableNumber, barItems, title: 'BAR'),
+  );
+}
+
+/// Shapes a [Kot] and an explicit [items] subset into the map
+/// [ThermalPrinter.printKotTicket] reads. Mirrors the socket `kot:new` payload
+/// (camelCase, `items[].name/quantity/note`). [title] prints a banner line
+/// (e.g. "BAR") so a split ticket is unmistakable at the pass.
+Map<String, dynamic> _kotPayload(
+  Kot kot,
+  String? tableNumber,
+  List<KotItem> items, {
+  String? title,
+}) =>
+    {
       'kotNumber': kot.kotNumber,
       'tableNumber': tableNumber ?? kot.tableNumber ?? '',
       'createdAt': kot.createdAt.toIso8601String(),
+      if (title != null) 'title': title,
       if (kot.notes != null && kot.notes!.isNotEmpty) 'notes': kot.notes,
       'items': [
-        for (final i in kot.items)
+        for (final i in items)
           {
             'name': i.menuItemName,
             'quantity': i.quantity,

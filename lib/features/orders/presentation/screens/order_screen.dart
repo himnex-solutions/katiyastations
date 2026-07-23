@@ -903,9 +903,10 @@ class _OrderScreenState extends ConsumerState<OrderScreen>
         // Switch to KOT History tab so they can see/edit it
         _rightPanelTab.animateTo(1);
 
-        // Print the ticket straight to the kitchen LAN printer, if this device
-        // has one set up with auto-print on. It's a direct socket to the
-        // printer's IP — no internet needed. A no-op otherwise.
+        // Print each part of the order straight over the LAN — food to the
+        // kitchen printer, bar/drink to the cashier's receipt printer. Both are
+        // direct sockets to the printers' IPs, so neither needs internet. No-op
+        // for whichever printer this device hasn't set up.
         try {
           final tableNumber = ref
               .read(tablesStreamProvider)
@@ -913,9 +914,10 @@ class _OrderScreenState extends ConsumerState<OrderScreen>
               ?.where((t) => t.id == widget.tableId)
               .firstOrNull
               ?.tableNumber;
-          await autoPrintKotToKitchen(ref, kot: kot, tableNumber: tableNumber?.toString());
+          await autoPrintKotToKitchen(ref, kot: kot, tableNumber: tableNumber);
+          await autoPrintBarToCashier(ref, kot: kot, tableNumber: tableNumber);
         } catch (e) {
-          messenger.showError('KOT sent, but it did not print: $e');
+          messenger.showError('KOT sent, but a ticket did not print: $e');
         }
       }
     } catch (e) {

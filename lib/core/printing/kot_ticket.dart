@@ -84,9 +84,23 @@ Future<List<int>> buildKotBytes(
   final table = _f(kot, 'tableNumber', 'table_number');
   final kotNo = _f(kot, 'kotNumber', 'kot_number');
   final ticketNote = _f(kot, 'notes', 'notes');
+  final title = _f(kot, 'title', 'title');
   final createdRaw = kot['createdAt'] ?? kot['created_at'];
   final when = DateTime.tryParse(createdRaw?.toString() ?? '') ?? DateTime.now();
   final items = (kot['items'] as List?) ?? const [];
+
+  // Optional banner (e.g. "BAR") so a station's split ticket is unmistakable.
+  if (title.isNotEmpty) {
+    for (final line in wrapForPaper('*** $title ***', bigCols)) {
+      b += g.text(line,
+          styles: const PosStyles(
+            align: PosAlign.center,
+            bold: true,
+            height: PosTextSize.size2,
+            width: PosTextSize.size2,
+          ));
+    }
+  }
 
   for (final line in wrapForPaper(table.isEmpty ? 'TAKEAWAY' : 'TABLE $table', bigCols)) {
     b += g.text(line,

@@ -8,6 +8,7 @@ import '../../../../core/utils/date_time_utils.dart';
 import '../../../../core/utils/responsive_utils.dart';
 import '../../../../core/constants/api_constants.dart';
 import '../../../../core/network/api_client.dart';
+import '../../../../core/offline/connectivity_provider.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
 import 'package:katiya_station_rms/features/cashier/domain/entities/bill_entities.dart';
 import '../../../../core/widgets/notification_bell.dart';
@@ -16,6 +17,9 @@ final billsStreamProvider =
     FutureProvider.family<List<Bill>, DateTimeRange?>((ref, range) async {
   final profile = ref.watch(authNotifierProvider).value;
   if (profile?.branchId == null) return [];
+  // Payment history lives on the server; offline, return empty instantly
+  // instead of hanging on a call that will time out.
+  if (!ref.read(connectivityProvider)) return const [];
   final response = await ApiClient.instance.get(
     ApiConstants.paymentHistory,
     queryParameters: {'branchId': profile!.branchId!, 'limit': '100'},
