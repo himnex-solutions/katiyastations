@@ -34,6 +34,10 @@ android {
         applicationId = "com.katiyastation.katiya_station_rms"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
+        // Pinned to 23 (Android 6.0) rather than Flutter's default (24 / Android
+        // 7.0) so the app installs on older tablets too. 23 is the floor the
+        // plugins allow — Firebase and flutter_secure_storage's encrypted store
+        // both require API 23, so it can't go lower without dropping them.
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode

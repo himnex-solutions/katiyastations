@@ -1,7 +1,7 @@
 name: katiya_station_rms
 description: Katiya Station Restaurant & Bar - Complete Restaurant Management System
 publish_to: 'none'
-version: 1.2.0+4
+version: 1.3.0+5
 
 environment:
   sdk: '>=3.3.0 <4.0.0'
