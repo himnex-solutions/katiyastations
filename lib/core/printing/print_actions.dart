@@ -10,6 +10,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../constants/app_colors.dart';
 import '../../features/branches/presentation/providers/branch_provider.dart';
+import '../../features/orders/domain/entities/order_entities.dart';
 import 'printer_config.dart';
 import 'thermal_printer.dart';
 
@@ -25,10 +26,17 @@ void _say(ScaffoldMessengerState messenger, String message, Color color) {
     ));
 }
 
-/// Returns the device's printer config, or null after explaining why this
-/// device cannot print. Both refusals used to be silent: the old buttons
+/// Validates [cfg] for a manual print, or returns null after explaining why
+/// this device cannot print. Both refusals used to be silent: the old buttons
 /// popped a green "sent to printer!" snackbar without sending a single byte.
-PrinterConfig? _readyPrinter(ScaffoldMessengerState messenger, WidgetRef ref) {
+///
+/// [what] names the printer role in the "not set up" message ("receipt
+/// printer" / "KOT printer") so the cashier knows which one to configure.
+PrinterConfig? _readyPrinter(
+  ScaffoldMessengerState messenger,
+  PrinterConfig cfg, {
+  required String what,
+}) {
   if (!thermalPrinter.supported) {
     _say(
       messenger,
@@ -38,11 +46,10 @@ PrinterConfig? _readyPrinter(ScaffoldMessengerState messenger, WidgetRef ref) {
     );
     return null;
   }
-  final cfg = ref.read(printerConfigProvider);
   if (!cfg.configured) {
     _say(
       messenger,
-      'No printer is paired on this device yet — Settings → Thermal Printer.',
+      'No $what is set up on this device yet — Settings → Thermal Printer.',
       AppColors.warning,
     );
     return null;
@@ -58,7 +65,8 @@ Future<void> printBillNow(
   required List<Map<String, dynamic>> items,
 }) async {
   final messenger = ScaffoldMessenger.of(context);
-  final cfg = _readyPrinter(messenger, ref);
+  final cfg = _readyPrinter(messenger, ref.read(receiptPrinterConfigProvider),
+      what: 'receipt printer');
   if (cfg == null) return;
   final branch = ref.read(currentBranchProvider).valueOrNull;
 
@@ -75,14 +83,15 @@ Future<void> printBillNow(
   }
 }
 
-/// Reprints a kitchen ticket on this device's printer.
+/// Reprints a kitchen ticket on this device's KOT (kitchen) printer.
 Future<void> printKotNow(
   BuildContext context,
   WidgetRef ref, {
   required Map<String, dynamic> kot,
 }) async {
   final messenger = ScaffoldMessenger.of(context);
-  final cfg = _readyPrinter(messenger, ref);
+  final cfg = _readyPrinter(messenger, ref.read(kotPrinterConfigProvider),
+      what: 'KOT printer');
   if (cfg == null) return;
 
   try {
@@ -92,3 +101,39 @@ Future<void> printKotNow(
     _say(messenger, 'Print failed: $e', AppColors.error);
   }
 }
+
+/// Prints [kot] straight to this device's kitchen (KOT) printer over the LAN,
+/// the moment a waiter taps "Send KOT to Kitchen". It's a direct socket to the
+/// printer's IP, so it needs no internet.
+///
+/// A silent no-op when this device has no KOT printer set up, when auto-print
+/// is off, or on web. Throws when the printer is configured but the send fails
+/// (off, out of paper, wrong IP) so the caller can tell the waiter.
+Future<void> autoPrintKotToKitchen(
+  WidgetRef ref, {
+  required Kot kot,
+  String? tableNumber,
+}) async {
+  if (!thermalPrinter.supported) return;
+  final cfg = ref.read(kotPrinterConfigProvider);
+  if (!cfg.configured || !cfg.autoPrintKot) return;
+  await thermalPrinter.printKotTicket(config: cfg, kot: _kotPayload(kot, tableNumber));
+}
+
+/// Shapes a [Kot] into the map [ThermalPrinter.printKotTicket] reads. Mirrors
+/// the socket `kot:new` payload (camelCase, `items[].name/quantity/note`).
+Map<String, dynamic> _kotPayload(Kot kot, String? tableNumber) => {
+      'kotNumber': kot.kotNumber,
+      'tableNumber': tableNumber ?? kot.tableNumber ?? '',
+      'createdAt': kot.createdAt.toIso8601String(),
+      if (kot.notes != null && kot.notes!.isNotEmpty) 'notes': kot.notes,
+      'items': [
+        for (final i in kot.items)
+          {
+            'name': i.menuItemName,
+            'quantity': i.quantity,
+            if (i.notes != null && i.notes!.isNotEmpty) 'note': i.notes,
+            'status': i.status,
+          },
+      ],
+    };

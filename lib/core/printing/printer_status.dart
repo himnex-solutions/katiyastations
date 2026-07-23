@@ -23,12 +23,14 @@ const Duration _cheapPollInterval = Duration(seconds: 10);
 
 class PrinterStatusNotifier extends StateNotifier<PrinterProbe> {
   final Ref _ref;
+  final StateNotifierProvider<PrinterConfigNotifier, PrinterConfig> _configProvider;
   Timer? _timer;
   bool _probing = false;
 
-  PrinterStatusNotifier(this._ref) : super(PrinterProbe.checking()) {
+  PrinterStatusNotifier(this._ref, this._configProvider)
+      : super(PrinterProbe.checking()) {
     _ref.listen<PrinterConfig>(
-      printerConfigProvider,
+      _configProvider,
       (_, __) => _restart(),
       fireImmediately: true,
     );
@@ -62,7 +64,7 @@ class PrinterStatusNotifier extends StateNotifier<PrinterProbe> {
     if (_probing) return;
     _probing = true;
     try {
-      final result = await thermalPrinter.probe(_ref.read(printerConfigProvider));
+      final result = await thermalPrinter.probe(_ref.read(_configProvider));
       if (mounted) state = result;
     } catch (e) {
       if (mounted) {
@@ -86,7 +88,18 @@ class PrinterStatusNotifier extends StateNotifier<PrinterProbe> {
 
 /// autoDispose so the poll (and any Bluetooth scanning) stops as soon as no
 /// screen is showing the status.
-final printerStatusProvider =
+///
+/// Tracks the receipt printer — the till's primary printer, shown in the
+/// cashier app bar. Aliased as [printerStatusProvider] for existing callers.
+final receiptPrinterStatusProvider =
     StateNotifierProvider.autoDispose<PrinterStatusNotifier, PrinterProbe>(
-  (ref) => PrinterStatusNotifier(ref),
+  (ref) => PrinterStatusNotifier(ref, receiptPrinterConfigProvider),
 );
+
+/// Live reachability of this device's kitchen (KOT) printer.
+final kotPrinterStatusProvider =
+    StateNotifierProvider.autoDispose<PrinterStatusNotifier, PrinterProbe>(
+  (ref) => PrinterStatusNotifier(ref, kotPrinterConfigProvider),
+);
+
+final printerStatusProvider = receiptPrinterStatusProvider;

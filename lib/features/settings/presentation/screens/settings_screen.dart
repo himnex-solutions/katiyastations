@@ -7,6 +7,7 @@ import '../../../../core/constants/app_colors.dart';
 import '../../../../core/utils/responsive_utils.dart';
 import '../../../../core/constants/app_constants.dart';
 import '../../../../core/printing/printer_config.dart';
+import '../../../../core/printing/printer_status.dart';
 import '../../../../core/printing/printer_status_pill.dart';
 import '../../../../core/printing/thermal_printer.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
@@ -86,9 +87,30 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               ]),
             ),
             const SizedBox(height: 24),
-            const _SectionHeader('Thermal Printer (KOT / Receipts)'),
+            const _SectionHeader('Receipt / Bill Printer'),
             const SizedBox(height: 12),
-            const _PrinterSettingsCard(),
+            _PrinterSettingsCard(
+              configProvider: receiptPrinterConfigProvider,
+              statusProvider: receiptPrinterStatusProvider,
+              emptyTitle: 'No receipt printer set up',
+              emptyHint: 'Tap “Set up” to connect the bill printer (USB at the till).',
+            ),
+            const SizedBox(height: 24),
+            const _SectionHeader('Kitchen (KOT) Printer'),
+            const SizedBox(height: 12),
+            _PrinterSettingsCard(
+              configProvider: kotPrinterConfigProvider,
+              statusProvider: kotPrinterStatusProvider,
+              emptyTitle: 'No KOT printer set up',
+              emptyHint: 'Tap “Set up” to connect the kitchen printer (LAN / network).',
+              autoPrint: (
+                title: 'Auto-print KOT to kitchen',
+                subtitle:
+                    'When on, tapping “Send KOT to Kitchen” prints the ticket straight '
+                    'to this LAN printer — no internet needed. Turn it on for every '
+                    'device that takes orders.',
+              ),
+            ),
             const SizedBox(height: 24),
             const _SectionHeader('System Info'),
             const SizedBox(height: 12),
@@ -151,7 +173,25 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 //  PRINTER SETTINGS CARD — per-device thermal printer setup
 // ═══════════════════════════════════════════════════════════════════════
 class _PrinterSettingsCard extends ConsumerStatefulWidget {
-  const _PrinterSettingsCard();
+  /// This card's printer (receipt or KOT) and its live status.
+  final StateNotifierProvider<PrinterConfigNotifier, PrinterConfig> configProvider;
+  final AutoDisposeStateNotifierProvider<PrinterStatusNotifier, PrinterProbe>
+      statusProvider;
+  final String emptyTitle;
+  final String emptyHint;
+
+  /// When set, shows the "auto-print KOT on Send" toggle with this copy. Only
+  /// the kitchen printer offers it; the receipt printer prints on demand.
+  final ({String title, String subtitle})? autoPrint;
+
+  const _PrinterSettingsCard({
+    required this.configProvider,
+    required this.statusProvider,
+    required this.emptyTitle,
+    required this.emptyHint,
+    this.autoPrint,
+  });
+
   @override
   ConsumerState<_PrinterSettingsCard> createState() => _PrinterSettingsCardState();
 }
@@ -160,7 +200,7 @@ class _PrinterSettingsCardState extends ConsumerState<_PrinterSettingsCard> {
   bool _testing = false;
 
   Future<void> _openSetup() async {
-    final current = ref.read(printerConfigProvider);
+    final current = ref.read(widget.configProvider);
     final result = await showModalBottomSheet<PrinterConfig>(
       context: context,
       isScrollControlled: true,
@@ -169,7 +209,7 @@ class _PrinterSettingsCardState extends ConsumerState<_PrinterSettingsCard> {
       builder: (_) => _PrinterSetupSheet(initial: current),
     );
     if (result != null) {
-      await ref.read(printerConfigProvider.notifier).save(result);
+      await ref.read(widget.configProvider.notifier).save(result);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Printer saved.'), backgroundColor: AppColors.success),
@@ -179,7 +219,7 @@ class _PrinterSettingsCardState extends ConsumerState<_PrinterSettingsCard> {
   }
 
   Future<void> _testPrint() async {
-    final cfg = ref.read(printerConfigProvider);
+    final cfg = ref.read(widget.configProvider);
     final messenger = ScaffoldMessenger.of(context);
     setState(() => _testing = true);
     try {
@@ -197,7 +237,7 @@ class _PrinterSettingsCardState extends ConsumerState<_PrinterSettingsCard> {
 
   @override
   Widget build(BuildContext context) {
-    final cfg = ref.watch(printerConfigProvider);
+    final cfg = ref.watch(widget.configProvider);
     final supported = thermalPrinter.supported;
 
     return Container(
@@ -228,7 +268,7 @@ class _PrinterSettingsCardState extends ConsumerState<_PrinterSettingsCard> {
         // Live reachability — re-probed on a timer and whenever the config
         // below changes, so this reflects the printer's state right now
         // rather than the last time someone hit "Test print".
-        const PrinterStatusBanner(),
+        PrinterStatusBanner(statusProvider: widget.statusProvider),
         const SizedBox(height: 14),
 
         // Current printer summary
@@ -244,9 +284,9 @@ class _PrinterSettingsCardState extends ConsumerState<_PrinterSettingsCard> {
           const SizedBox(width: 14),
           Expanded(
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(cfg.configured ? (cfg.name.isNotEmpty ? cfg.name : cfg.kindLabel) : 'No printer set up',
+              Text(cfg.configured ? (cfg.name.isNotEmpty ? cfg.name : cfg.kindLabel) : widget.emptyTitle,
                   style: GoogleFonts.outfit(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
-              Text(cfg.configured ? '${cfg.kindLabel} · ${cfg.target} · ${cfg.paperMm}mm' : 'Tap “Set up” to connect a thermal printer',
+              Text(cfg.configured ? '${cfg.kindLabel} · ${cfg.target} · ${cfg.paperMm}mm' : widget.emptyHint,
                   style: GoogleFonts.outfit(fontSize: 12, color: AppColors.textSecondary)),
             ]),
           ),
@@ -271,23 +311,25 @@ class _PrinterSettingsCardState extends ConsumerState<_PrinterSettingsCard> {
             ),
           ),
         ]),
-        const Divider(height: 28),
-
-        // Auto-print toggle — this makes the device a KOT print station.
-        SwitchListTile(
-          contentPadding: EdgeInsets.zero,
-          thumbColor: const WidgetStatePropertyAll(AppColors.primary),
-          value: cfg.autoPrintKot,
-          onChanged: (supported && cfg.configured)
-              ? (v) => ref.read(printerConfigProvider.notifier).setAutoPrint(v)
-              : null,
-          title: Text('Auto-print KOT on this device',
-              style: GoogleFonts.outfit(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
-          subtitle: Text(
-            'When on, every KOT a waiter sends prints here instantly. Turn this on for the kitchen station only.',
-            style: GoogleFonts.outfit(fontSize: 11, color: AppColors.textSecondary, height: 1.3),
+        // Auto-print toggle — kitchen printer only. Prints the KOT the instant
+        // a waiter taps Send, straight over the LAN.
+        if (widget.autoPrint != null) ...[
+          const Divider(height: 28),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            thumbColor: const WidgetStatePropertyAll(AppColors.primary),
+            value: cfg.autoPrintKot,
+            onChanged: (supported && cfg.configured)
+                ? (v) => ref.read(widget.configProvider.notifier).setAutoPrint(v)
+                : null,
+            title: Text(widget.autoPrint!.title,
+                style: GoogleFonts.outfit(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+            subtitle: Text(
+              widget.autoPrint!.subtitle,
+              style: GoogleFonts.outfit(fontSize: 11, color: AppColors.textSecondary, height: 1.3),
+            ),
           ),
-        ),
+        ],
       ]),
     );
   }

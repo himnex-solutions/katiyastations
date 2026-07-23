@@ -165,30 +165,33 @@ class PrinterConfig {
         'autoPrintKot': autoPrintKot,
         'configured': configured,
       };
-
-  static const _prefsKey = 'thermal_printer_config';
 }
 
 // ── Persisted config provider ───────────────────────────────
 
+/// Stores one printer's setup in SharedPreferences under [_key]. A device can
+/// hold two of these at once — the receipt printer at the till and the KOT
+/// printer in the kitchen — each in its own namespace.
 class PrinterConfigNotifier extends StateNotifier<PrinterConfig> {
-  PrinterConfigNotifier() : super(const PrinterConfig()) {
+  PrinterConfigNotifier(this._key) : super(const PrinterConfig()) {
     _load();
   }
+
+  final String _key;
 
   Future<void> _load() async {
     final prefs = await SharedPreferences.getInstance();
     state = PrinterConfig(
-      kind: _kindFrom(prefs.getString('${PrinterConfig._prefsKey}.kind')),
-      address: prefs.getString('${PrinterConfig._prefsKey}.address') ?? '',
-      port: prefs.getInt('${PrinterConfig._prefsKey}.port') ?? 9100,
-      name: prefs.getString('${PrinterConfig._prefsKey}.name') ?? '',
-      vendorId: prefs.getString('${PrinterConfig._prefsKey}.vendorId') ?? '',
-      productId: prefs.getString('${PrinterConfig._prefsKey}.productId') ?? '',
-      isBle: prefs.getBool('${PrinterConfig._prefsKey}.isBle') ?? false,
-      paperMm: prefs.getInt('${PrinterConfig._prefsKey}.paperMm') ?? 80,
-      autoPrintKot: prefs.getBool('${PrinterConfig._prefsKey}.autoPrintKot') ?? false,
-      configured: prefs.getBool('${PrinterConfig._prefsKey}.configured') ?? false,
+      kind: _kindFrom(prefs.getString('$_key.kind')),
+      address: prefs.getString('$_key.address') ?? '',
+      port: prefs.getInt('$_key.port') ?? 9100,
+      name: prefs.getString('$_key.name') ?? '',
+      vendorId: prefs.getString('$_key.vendorId') ?? '',
+      productId: prefs.getString('$_key.productId') ?? '',
+      isBle: prefs.getBool('$_key.isBle') ?? false,
+      paperMm: prefs.getInt('$_key.paperMm') ?? 80,
+      autoPrintKot: prefs.getBool('$_key.autoPrintKot') ?? false,
+      configured: prefs.getBool('$_key.configured') ?? false,
     );
   }
 
@@ -196,20 +199,35 @@ class PrinterConfigNotifier extends StateNotifier<PrinterConfig> {
     state = config;
     final prefs = await SharedPreferences.getInstance();
     final m = config._toMap();
-    await prefs.setString('${PrinterConfig._prefsKey}.kind', m['kind'] as String);
-    await prefs.setString('${PrinterConfig._prefsKey}.address', m['address'] as String);
-    await prefs.setInt('${PrinterConfig._prefsKey}.port', m['port'] as int);
-    await prefs.setString('${PrinterConfig._prefsKey}.name', m['name'] as String);
-    await prefs.setString('${PrinterConfig._prefsKey}.vendorId', m['vendorId'] as String);
-    await prefs.setString('${PrinterConfig._prefsKey}.productId', m['productId'] as String);
-    await prefs.setBool('${PrinterConfig._prefsKey}.isBle', m['isBle'] as bool);
-    await prefs.setInt('${PrinterConfig._prefsKey}.paperMm', m['paperMm'] as int);
-    await prefs.setBool('${PrinterConfig._prefsKey}.autoPrintKot', m['autoPrintKot'] as bool);
-    await prefs.setBool('${PrinterConfig._prefsKey}.configured', m['configured'] as bool);
+    await prefs.setString('$_key.kind', m['kind'] as String);
+    await prefs.setString('$_key.address', m['address'] as String);
+    await prefs.setInt('$_key.port', m['port'] as int);
+    await prefs.setString('$_key.name', m['name'] as String);
+    await prefs.setString('$_key.vendorId', m['vendorId'] as String);
+    await prefs.setString('$_key.productId', m['productId'] as String);
+    await prefs.setBool('$_key.isBle', m['isBle'] as bool);
+    await prefs.setInt('$_key.paperMm', m['paperMm'] as int);
+    await prefs.setBool('$_key.autoPrintKot', m['autoPrintKot'] as bool);
+    await prefs.setBool('$_key.configured', m['configured'] as bool);
   }
 
   Future<void> setAutoPrint(bool value) => save(state.copyWith(autoPrintKot: value));
 }
 
-final printerConfigProvider =
-    StateNotifierProvider<PrinterConfigNotifier, PrinterConfig>((ref) => PrinterConfigNotifier());
+/// The till's receipt / bill printer — typically a USB printer at the cashier.
+/// Keeps the original prefs key so any printer already set up carries over.
+final receiptPrinterConfigProvider =
+    StateNotifierProvider<PrinterConfigNotifier, PrinterConfig>(
+        (ref) => PrinterConfigNotifier('thermal_printer_config'));
+
+/// The kitchen's KOT printer — typically a LAN/network printer with no device
+/// attached. When [PrinterConfig.autoPrintKot] is on, the ticket prints the
+/// instant a waiter taps "Send KOT to Kitchen", straight over the LAN with no
+/// internet round-trip.
+final kotPrinterConfigProvider =
+    StateNotifierProvider<PrinterConfigNotifier, PrinterConfig>(
+        (ref) => PrinterConfigNotifier('kot_printer_config'));
+
+/// Backwards-compatible alias. The receipt printer is the device's primary
+/// printer, so existing bill and status code keeps working unchanged.
+final printerConfigProvider = receiptPrinterConfigProvider;

@@ -95,13 +95,16 @@ class PrinterStatusPill extends ConsumerWidget {
   }
 }
 
-/// Full-width status row for the Settings printer card.
+/// Full-width status row for the Settings printer card. Each card passes the
+/// status provider for its own printer (receipt or KOT).
 class PrinterStatusBanner extends ConsumerWidget {
-  const PrinterStatusBanner({super.key});
+  final AutoDisposeStateNotifierProvider<PrinterStatusNotifier, PrinterProbe>
+      statusProvider;
+  const PrinterStatusBanner({super.key, required this.statusProvider});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final probe = ref.watch(printerStatusProvider);
+    final probe = ref.watch(statusProvider);
     final color = printerStatusColor(probe.state);
 
     return Container(
@@ -137,7 +140,7 @@ class PrinterStatusBanner extends ConsumerWidget {
             tooltip: 'Re-check now',
             icon: const Icon(Icons.refresh_rounded, size: 18),
             color: color,
-            onPressed: () => ref.read(printerStatusProvider.notifier).refresh(),
+            onPressed: () => ref.read(statusProvider.notifier).refresh(),
           ),
         ],
       ),

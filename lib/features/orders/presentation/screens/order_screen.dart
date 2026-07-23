@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import '../../../../core/constants/app_colors.dart';
+import '../../../../core/printing/print_actions.dart';
 import '../../../../core/widgets/app_snackbar.dart';
 import '../../../../core/widgets/confirm_dialog.dart';
 import '../../../../core/utils/responsive_utils.dart';
@@ -900,6 +901,21 @@ class _OrderScreenState extends ConsumerState<OrderScreen>
         messenger.showSuccess('${kot.kotNumber} sent to kitchen!');
         // Switch to KOT History tab so they can see/edit it
         _rightPanelTab.animateTo(1);
+
+        // Print the ticket straight to the kitchen LAN printer, if this device
+        // has one set up with auto-print on. It's a direct socket to the
+        // printer's IP — no internet needed. A no-op otherwise.
+        try {
+          final tableNumber = ref
+              .read(tablesStreamProvider)
+              .value
+              ?.where((t) => t.id == widget.tableId)
+              .firstOrNull
+              ?.tableNumber;
+          await autoPrintKotToKitchen(ref, kot: kot, tableNumber: tableNumber?.toString());
+        } catch (e) {
+          messenger.showError('KOT sent, but it did not print: $e');
+        }
       }
     } catch (e) {
       messenger.showError('Error sending KOT: $e');
