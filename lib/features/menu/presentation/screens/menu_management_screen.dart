@@ -1,5 +1,6 @@
 import 'package:dio/dio.dart';
 // ignore_for_file: deprecated_member_use  // DropdownButtonFormField.value kept for Flutter 3.32.0 web build
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_animate/flutter_animate.dart';
@@ -1470,25 +1471,22 @@ class _MenuItemCard extends StatelessWidget {
               AspectRatio(
                 aspectRatio: 1.5,
                 child: hasImage
-                    ? Image.network(
-                        menuImageUrl(item.imageUrl!, width: 500),
+                    ? CachedNetworkImage(
+                        imageUrl: menuImageUrl(item.imageUrl!, width: 500),
                         fit: BoxFit.cover,
-                        cacheWidth: 500,
-                        loadingBuilder: (ctx, child, progress) {
-                          if (progress == null) return child;
-                          return Container(
-                            color: AppColors.surfaceVariant,
-                            child: const Center(
-                              child: SizedBox(
-                                width: 18,
-                                height: 18,
-                                child: CircularProgressIndicator(
-                                    strokeWidth: 2, color: AppColors.primary),
-                              ),
+                        memCacheWidth: 500,
+                        placeholder: (_, __) => Container(
+                          color: AppColors.surfaceVariant,
+                          child: const Center(
+                            child: SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(
+                                  strokeWidth: 2, color: AppColors.primary),
                             ),
-                          );
-                        },
-                        errorBuilder: (_, __, ___) => _placeholder(typeColor),
+                          ),
+                        ),
+                        errorWidget: (_, __, ___) => _placeholder(typeColor),
                       )
                     : _placeholder(typeColor),
               ),

@@ -323,7 +323,29 @@ model Bill {
   creditRecords CreditRecord[]
   payments      Payment[]
 
+  // A bill/invoice number must be unique within a branch — hard guarantee that
+  // no two settled bills can ever share one. Numbers are allocated from an
+  // atomic Counter (see below), so this constraint should never actually trip.
+  @@unique([branchId, billNumber])
+  @@unique([branchId, invoiceNumber])
   @@map("bills")
+}
+
+// ── 9b. Sequence counters ────────────────────────────────────
+// One row per (branch, scope, day) holding the last number handed out, so
+// bill/invoice numbers are allocated atomically and sequentially — no random
+// collisions, no duplicates, even when two cashiers settle at the same instant
+// (the row lock serialises them). See common/utils/sequence.util.ts.
+model Counter {
+  id        String   @id @default(uuid())
+  branchId  String   @map("branch_id")
+  scope     String // BILL | INV
+  period    String // yyyymmdd
+  value     Int      @default(0)
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([branchId, scope, period])
+  @@map("counters")
 }
 
 // ── 9b. Payments (multi-tender / partial payment ledger) ─────

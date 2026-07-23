@@ -25,63 +25,67 @@ List<MenuItem> _availableItems(List<dynamic> rows) => rows
     .toList()
   ..sort((a, b) => a.name.compareTo(b.name));
 
-// Menu categories for ordering (by branchId). Cached on success so the waiter
-// can still build an order while offline; falls back to that cache on a
-// network failure.
-final menuCategoriesProvider =
-    FutureProvider.family<List<MenuCategory>, String>((ref, branchId) async {
-  final key = CacheKeys.menuCategories(branchId);
+/// Offline-first fetch: when the app is offline and a cached copy exists, it is
+/// returned **immediately** — no network call, so nothing waits on a timeout.
+/// Otherwise it fetches, caches on success, and falls back to the cache on a
+/// network failure. This is what keeps the waiter screen instant with no
+/// internet instead of stalling on every load.
+Future<List<T>> _offlineFirst<T>(
+  Ref ref,
+  String key,
+  Future<List<dynamic>> Function() fetch,
+  List<T> Function(List<dynamic>) map,
+) async {
+  if (!ref.read(connectivityProvider)) {
+    final cached = await OfflineCache.instance.get(key);
+    if (cached is List) return map(cached);
+  }
   try {
-    final response = await ApiClient.instance.get(
-      ApiConstants.menuCategories,
-      queryParameters: {'branchId': branchId},
-    );
-    final rows = response.data as List<dynamic>;
+    final rows = await fetch();
     await OfflineCache.instance.put(key, rows);
-    return _activeCategories(rows);
+    return map(rows);
   } on NetworkException {
     final cached = await OfflineCache.instance.get(key);
-    if (cached is List) return _activeCategories(cached);
+    if (cached is List) return map(cached);
     rethrow;
   }
+}
+
+Future<List<dynamic>> _getRows(String path, Map<String, dynamic> query) async =>
+    (await ApiClient.instance.get(path, queryParameters: query)).data as List<dynamic>;
+
+// Menu categories for ordering (by branchId). Offline-first so the waiter can
+// still build an order with no internet, instantly.
+final menuCategoriesProvider =
+    FutureProvider.family<List<MenuCategory>, String>((ref, branchId) {
+  return _offlineFirst(
+    ref,
+    CacheKeys.menuCategories(branchId),
+    () => _getRows(ApiConstants.menuCategories, {'branchId': branchId}),
+    _activeCategories,
+  );
 });
 
 // Menu items for ordering (by categoryId).
 final menuItemsProvider =
-    FutureProvider.family<List<MenuItem>, String>((ref, categoryId) async {
-  final key = CacheKeys.menuItemsByCategory(categoryId);
-  try {
-    final response = await ApiClient.instance.get(
-      ApiConstants.menuItems,
-      queryParameters: {'categoryId': categoryId},
-    );
-    final rows = response.data as List<dynamic>;
-    await OfflineCache.instance.put(key, rows);
-    return _availableItems(rows);
-  } on NetworkException {
-    final cached = await OfflineCache.instance.get(key);
-    if (cached is List) return _availableItems(cached);
-    rethrow;
-  }
+    FutureProvider.family<List<MenuItem>, String>((ref, categoryId) {
+  return _offlineFirst(
+    ref,
+    CacheKeys.menuItemsByCategory(categoryId),
+    () => _getRows(ApiConstants.menuItems, {'categoryId': categoryId}),
+    _availableItems,
+  );
 });
 
 // All menu items across every category for a branch — used by menu search.
 final allMenuItemsProvider =
-    FutureProvider.family<List<MenuItem>, String>((ref, branchId) async {
-  final key = CacheKeys.menuItemsByBranch(branchId);
-  try {
-    final response = await ApiClient.instance.get(
-      ApiConstants.menuItems,
-      queryParameters: {'branchId': branchId},
-    );
-    final rows = response.data as List<dynamic>;
-    await OfflineCache.instance.put(key, rows);
-    return _availableItems(rows);
-  } on NetworkException {
-    final cached = await OfflineCache.instance.get(key);
-    if (cached is List) return _availableItems(cached);
-    rethrow;
-  }
+    FutureProvider.family<List<MenuItem>, String>((ref, branchId) {
+  return _offlineFirst(
+    ref,
+    CacheKeys.menuItemsByBranch(branchId),
+    () => _getRows(ApiConstants.menuItems, {'branchId': branchId}),
+    _availableItems,
+  );
 });
 
 KotWithItems _kotWithItemsFromJson(Map<String, dynamic> json) => KotWithItems(

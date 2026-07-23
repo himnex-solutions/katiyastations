@@ -274,6 +274,34 @@ class _IoThermalPrinter implements ThermalPrinter {
   }
 
 
+  /// Centered, bold heading (restaurant name / title) that wraps on word
+  /// boundaries, so a long name like "KATIYA STATION RESTAURANT & BAR" prints
+  /// on tidy centered lines instead of being chopped mid-word by the printer.
+  /// [big] doubles the size, where only half as many columns fit per line.
+  List<int> _centeredHeading(Generator g, PrinterConfig cfg, String text, {bool big = false}) {
+    final cols = big ? paperCols(cfg) ~/ 2 : paperCols(cfg);
+    final styles = PosStyles(
+      align: PosAlign.center,
+      bold: true,
+      height: big ? PosTextSize.size2 : PosTextSize.size1,
+      width: big ? PosTextSize.size2 : PosTextSize.size1,
+    );
+    var out = <int>[];
+    for (final line in wrapForPaper(text, cols)) {
+      out += g.text(line, styles: styles);
+    }
+    return out;
+  }
+
+  /// Centered normal-width text (address, tagline) that also wraps to the paper.
+  List<int> _centeredLines(Generator g, PrinterConfig cfg, String text) {
+    var out = <int>[];
+    for (final line in wrapForPaper(text, paperCols(cfg))) {
+      out += g.text(line, styles: const PosStyles(align: PosAlign.center));
+    }
+    return out;
+  }
+
   /// Two-column money line: label left, amount right-aligned to the paper edge.
   List<int> _money(Generator g, String label, double value, {bool bold = false}) =>
       g.row([
@@ -318,13 +346,12 @@ class _IoThermalPrinter implements ThermalPrinter {
     // it from being mistaken for a tax receipt.
     final isInvoice = invoiceNo.isNotEmpty;
 
-    b += g.text(_branchName(branch),
-        styles: const PosStyles(align: PosAlign.center, bold: true, height: PosTextSize.size2, width: PosTextSize.size2));
+    b += _centeredHeading(g, cfg, _branchName(branch), big: true);
     if (branch?['address'] != null) {
-      b += g.text(branch!['address'].toString(), styles: const PosStyles(align: PosAlign.center));
+      b += _centeredLines(g, cfg, branch!['address'].toString());
     }
     if (branch?['phone'] != null) {
-      b += g.text('Tel: ${branch!['phone']}', styles: const PosStyles(align: PosAlign.center));
+      b += _centeredLines(g, cfg, 'Tel: ${branch!['phone']}');
     }
     b += g.text(isInvoice ? 'TAX INVOICE' : 'BILL (not a tax invoice)',
         styles: const PosStyles(align: PosAlign.center, bold: true));
@@ -384,8 +411,7 @@ class _IoThermalPrinter implements ThermalPrinter {
   Future<List<int>> _buildTestBytes(PrinterConfig cfg, Map<String, dynamic>? branch) async {
     final g = Generator(_paper(cfg), await _profile());
     var b = <int>[];
-    b += g.text(_branchName(branch),
-        styles: const PosStyles(align: PosAlign.center, bold: true, height: PosTextSize.size2, width: PosTextSize.size2));
+    b += _centeredHeading(g, cfg, _branchName(branch), big: true);
     b += g.text('Printer Test', styles: const PosStyles(align: PosAlign.center, bold: true));
     b += g.hr();
     b += g.text('Connection: ${cfg.kindLabel}');

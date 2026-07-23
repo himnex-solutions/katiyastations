@@ -49,6 +49,10 @@ dependencies:
   google_fonts: ^6.2.1
   flutter_animate: ^4.5.0
   shimmer: ^3.0.0
+
+  # Disk-persisted network images — menu photos keep showing when the internet
+  # is down (Image.network only caches in memory, so it went blank offline).
+  cached_network_image: ^3.4.1
   fl_chart: ^0.67.0
   gap: ^3.0.1
 

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:go_router/go_router.dart';
@@ -1449,15 +1450,12 @@ class _MenuItemCardTile extends StatelessWidget {
                 fit: StackFit.expand,
                 children: [
                   hasImage
-                      ? Image.network(
-                          menuImageUrl(item.imageUrl!, width: 400),
+                      ? CachedNetworkImage(
+                          imageUrl: menuImageUrl(item.imageUrl!, width: 400),
                           fit: BoxFit.cover,
-                          cacheWidth: 400,
-                          loadingBuilder: (ctx, child, progress) {
-                            if (progress == null) return child;
-                            return const _ImageLoadingPlaceholder();
-                          },
-                          errorBuilder: (_, __, ___) => const _MenuImagePlaceholder(),
+                          memCacheWidth: 400,
+                          placeholder: (_, __) => const _ImageLoadingPlaceholder(),
+                          errorWidget: (_, __, ___) => const _MenuImagePlaceholder(),
                         )
                       : const _MenuImagePlaceholder(),
                   if (qty > 0)

@@ -12,6 +12,7 @@ import 'package:pretty_dio_logger/pretty_dio_logger.dart';
 import '../constants/api_constants.dart';
 import '../errors/app_exceptions.dart';
 import '../storage/secure_storage.dart';
+import 'network_info.dart';
 
 // ── Result Type for API calls ──────────────────────────────
 typedef ApiResult<T> = Future<T>;
@@ -48,6 +49,19 @@ class ApiClient {
         // session-timeout/auto-logout behavior reported.
       ),
     );
+
+    // ── Reachability signal ────────────────────────────────
+    // Any real response proves the backend is reachable; feed that straight
+    // to the connectivity layer so it flips online the instant traffic
+    // succeeds (the matching offline flip lives in _mapDioError, on a
+    // connection error/timeout). This is what lets "WiFi but no internet" be
+    // recognised without waiting for the periodic poll.
+    _dio.interceptors.add(InterceptorsWrapper(
+      onResponse: (response, handler) {
+        NetworkInfo.instance.onObserved?.call(true);
+        handler.next(response);
+      },
+    ));
 
     // ── Auth Interceptor (JWT + Auto-Refresh) ──────────────
     _dio.interceptors.add(_JwtInterceptor(_dio));
@@ -197,9 +211,13 @@ class ApiClient {
       case DioExceptionType.connectionTimeout:
       case DioExceptionType.sendTimeout:
       case DioExceptionType.receiveTimeout:
+        // The server didn't answer — tell the connectivity layer to go offline
+        // now so the next calls short-circuit instead of each hanging out.
+        NetworkInfo.instance.onObserved?.call(false);
         return const NetworkException('Connection timed out. Please check your internet.');
 
       case DioExceptionType.connectionError:
+        NetworkInfo.instance.onObserved?.call(false);
         return const NetworkException('Cannot reach the server. Check your network connection.');
 
       case DioExceptionType.badResponse:

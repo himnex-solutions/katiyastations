@@ -16,7 +16,7 @@ import { CurrentUserPayload } from '../../common/decorators/current-user.decorat
 import { resolveBranchScope } from '../../common/utils/branch-scope.util';
 import { buildPaginationMeta } from '../../common/dto/pagination.dto';
 import { BranchFilterDto } from '../../common/dto/branch-filter.dto';
-import { generateSequenceNumber } from '../../common/utils/sequence.util';
+import { nextSequenceNumber } from '../../common/utils/sequence.util';
 
 /** Only a manager (or the accountant who owns the books) may reverse settled
  * money — a cashier can take payment but not undo one. */
@@ -99,13 +99,18 @@ export class BillingService {
       paymentMethod === 'credit' ? 'credit' : amountPaid >= totalAmount ? 'paid' : 'partial_paid';
 
     const bill = await this.prisma.$transaction(async (tx) => {
+      // Allocated atomically from a per-branch counter inside this transaction,
+      // so concurrent settles get consecutive numbers — never a duplicate.
+      const billNumber = await nextSequenceNumber(tx, session.branchId, 'BILL');
+      const invoiceNumber = await nextSequenceNumber(tx, session.branchId, 'INV');
+
       const created = await tx.bill.create({
         data: {
           branchId: session.branchId,
           sessionId: session.id,
           tableId: session.tableId,
-          billNumber: generateSequenceNumber('BILL'),
-          invoiceNumber: generateSequenceNumber('INV'),
+          billNumber,
+          invoiceNumber,
           subTotal,
           discount,
           serviceCharge,

@@ -195,7 +195,11 @@ class ApiConstants {
   static String uploadMenuItemImage(String itemId) => '/uploads/menu-items/$itemId';
 
   // ── Request Timeouts ──────────────────────────────────────
-  static const Duration connectTimeout = Duration(seconds: 15);
+  // connectTimeout is the ceiling on how long a call can hang before the
+  // offline fallback runs, so it is kept short: on a LAN with no internet the
+  // TCP connect fails fast, and 15s here used to freeze every send/screen for
+  // that long before giving up.
+  static const Duration connectTimeout = Duration(seconds: 5);
   static const Duration receiveTimeout = Duration(seconds: 30);
   static const Duration sendTimeout = Duration(seconds: 30);
 
