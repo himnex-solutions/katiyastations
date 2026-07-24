@@ -801,6 +801,13 @@ class _MenuManagementScreenState extends ConsumerState<MenuManagementScreen> {
               ],
             ),
           ),
+          // Edit this section — mainly to set its type (Food → kitchen printer,
+          // Drink/Bar → cashier bar printer).
+          IconButton(
+            tooltip: 'Edit section (name / type)',
+            icon: const Icon(Icons.edit_rounded, size: 18, color: AppColors.textSecondary),
+            onPressed: () => _showCategoryDialog(context, cat),
+          ),
         ],
       ),
     );
@@ -820,9 +827,9 @@ class _MenuManagementScreenState extends ConsumerState<MenuManagementScreen> {
   // ─────────────────────────────────────────────────────────
   //  ADD CATEGORY DIALOG
   // ─────────────────────────────────────────────────────────
-  Future<void> _showCategoryDialog(BuildContext context) async {
-    final nameCtrl = TextEditingController();
-    String type = 'food';
+  Future<void> _showCategoryDialog(BuildContext context, [MenuCategory? existing]) async {
+    final nameCtrl = TextEditingController(text: existing?.name ?? '');
+    String type = existing?.type ?? 'food';
     await showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -840,7 +847,7 @@ class _MenuManagementScreenState extends ConsumerState<MenuManagementScreen> {
                   color: AppColors.primary, size: 18),
             ),
             const SizedBox(width: 12),
-            Text('Add Category',
+            Text(existing == null ? 'Add Category' : 'Edit Category',
                 style: GoogleFonts.outfit(
                     fontSize: 16,
                     fontWeight: FontWeight.w700,
@@ -902,14 +909,24 @@ class _MenuManagementScreenState extends ConsumerState<MenuManagementScreen> {
                   throw Exception(
                       'Branch ID not found in user profile. Cannot add category.');
                 }
-                await ApiClient.instance.post(
-                  ApiConstants.menuCategories,
-                  data: {
-                    'branchId': profile!.branchId,
-                    'name': name,
-                    'type': type,
-                  },
-                );
+                if (existing == null) {
+                  await ApiClient.instance.post(
+                    ApiConstants.menuCategories,
+                    data: {
+                      'branchId': profile!.branchId,
+                      'name': name,
+                      'type': type,
+                    },
+                  );
+                } else {
+                  // Editing an existing section — updates its name and, crucially,
+                  // its station type (food | drink | bar) which routes every item
+                  // in it to the kitchen or bar printer.
+                  await ApiClient.instance.patch(
+                    ApiConstants.menuCategoryById(existing.id),
+                    data: {'name': name, 'type': type},
+                  );
+                }
                 if (ctx.mounted) Navigator.pop(ctx);
                 _refreshMenuCaches(ref);
                 _toast('Category "$name" added.',

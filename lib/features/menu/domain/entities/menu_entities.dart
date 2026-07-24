@@ -77,7 +77,13 @@ class MenuItem extends Equatable {
       description: json['description'] as String?,
       imageUrl: json['image_url'] as String?,
       isAvailable: json['is_available'] as bool? ?? true,
-      type: json['type'] as String? ?? 'food',
+      // Station type routes the ticket (kitchen vs bar). Prefer the item's
+      // CATEGORY type — that's what the menu is organised by and what the user
+      // sets — falling back to the item's own type only if the category isn't
+      // included in this payload.
+      type: (json['category'] as Map?)?['type'] as String? ??
+          json['type'] as String? ??
+          'food',
       barStockId: json['bar_stock_id'] as String?,
       pegsPerServing: (json['pegs_per_serving'] as num?)?.toDouble(),
     );

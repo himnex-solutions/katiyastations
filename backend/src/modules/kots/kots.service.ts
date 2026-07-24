@@ -90,12 +90,15 @@ export class KotsService {
 
     const menuItems = await this.prisma.menuItem.findMany({
       where: { id: { in: dto.items.map((i) => i.menuItemId) } },
+      include: { category: { select: { type: true } } },
     });
     const priceById = new Map(menuItems.map((m) => [m.id, m.price]));
-    // Carry each item's station type (food | drink | bar) onto the KOT item, so
-    // the client can route the ticket — food to the kitchen printer, bar/drink
-    // to the cashier's bar printer. Without this every item defaulted to 'food'.
-    const typeById = new Map(menuItems.map((m) => [m.id, m.type]));
+    // Route each KOT item by its CATEGORY's station type (food | drink | bar) —
+    // that's how the menu is organised and the type the user actually sets. The
+    // item's own `type` isn't settable through the app UI, so it can't be relied
+    // on. Food goes to the kitchen printer, drink/bar to the cashier's bar
+    // printer.
+    const typeById = new Map(menuItems.map((m) => [m.id, m.category?.type ?? 'food']));
 
     const kot = await this.prisma.kot.create({
       data: {
