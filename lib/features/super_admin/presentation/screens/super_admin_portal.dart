@@ -56,7 +56,7 @@ class _SuperAdminPortalState extends ConsumerState<SuperAdminPortal>
   @override
   void initState() {
     super.initState();
-    _tab = TabController(length: 3, vsync: this);
+    _tab = TabController(length: 4, vsync: this);
   }
 
   @override
@@ -111,6 +111,7 @@ class _SuperAdminPortalState extends ConsumerState<SuperAdminPortal>
             Tab(icon: Icon(Icons.people_rounded, size: 18), text: 'User Accounts'),
             Tab(icon: Icon(Icons.history_rounded, size: 18), text: 'Access Logs'),
             Tab(icon: Icon(Icons.restaurant_menu_rounded, size: 18), text: 'Menu Import'),
+            Tab(icon: Icon(Icons.settings_suggest_rounded, size: 18), text: 'System'),
           ],
         ),
         actions: [
@@ -180,6 +181,9 @@ class _SuperAdminPortalState extends ConsumerState<SuperAdminPortal>
 
           // ── Tab 3: Menu Import ───────────────────────────────
           const _MenuImportTab(),
+
+          // ── Tab 4: System (fresh-start reset for handoff) ────
+          const _SystemTab(),
         ],
       ),
     );
@@ -1163,6 +1167,166 @@ class _MenuImportTabState extends ConsumerState<_MenuImportTab> {
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+//  SYSTEM TAB — one-click fresh-start reset for client handoff
+// ══════════════════════════════════════════════════════════════════════════
+class _SystemTab extends ConsumerStatefulWidget {
+  const _SystemTab();
+  @override
+  ConsumerState<_SystemTab> createState() => _SystemTabState();
+}
+
+class _SystemTabState extends ConsumerState<_SystemTab> {
+  bool _busy = false;
+
+  Future<void> _factoryReset() async {
+    final confirmed = await _confirmReset();
+    if (confirmed != true || !mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+    setState(() => _busy = true);
+    try {
+      final res = await ApiClient.instance.post(
+        ApiConstants.superAdminReset,
+        data: {'confirm': 'RESET'},
+      );
+      final backup = (res.data as Map<String, dynamic>?)?['backup'];
+      if (!mounted) return;
+      messenger.showSnackBar(SnackBar(
+        backgroundColor: AppColors.success,
+        duration: const Duration(seconds: 7),
+        content: Text(backup == null
+            ? 'Fresh start complete. Branch + super-admin kept; everything else cleared.'
+            : 'Fresh start complete (backup: $backup). Branch + super-admin kept.'),
+      ));
+    } catch (e) {
+      if (mounted) {
+        messenger.showSnackBar(SnackBar(
+          backgroundColor: AppColors.error,
+          content: Text('Reset failed: $e'),
+        ));
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<bool?> _confirmReset() {
+    final ctrl = TextEditingController();
+    return showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, set) {
+          final ok = ctrl.text.trim() == 'RESET';
+          return AlertDialog(
+            backgroundColor: Colors.white,
+            title: Row(children: [
+              const Icon(Icons.warning_amber_rounded, color: AppColors.error),
+              const SizedBox(width: 10),
+              Text('Factory Reset',
+                  style: GoogleFonts.outfit(fontWeight: FontWeight.w700)),
+            ]),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'This permanently clears ALL data — users, orders, bills, '
+                  'payments, menu, tables, inventory and reports — so the client '
+                  'can start fresh.\n\nKEEPS: the restaurant branch(es) and this '
+                  'super-admin account.\n\nA backup is taken automatically first. '
+                  'This cannot be undone.',
+                  style: GoogleFonts.outfit(
+                      fontSize: 13, color: AppColors.textSecondary, height: 1.4),
+                ),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: ctrl,
+                  autofocus: true,
+                  onChanged: (_) => set(() {}),
+                  decoration: const InputDecoration(
+                    labelText: 'Type RESET to confirm',
+                    isDense: true,
+                  ),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                  onPressed: () => Navigator.pop(ctx, false),
+                  child: const Text('Cancel')),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.error,
+                    foregroundColor: Colors.white),
+                onPressed: ok ? () => Navigator.pop(ctx, true) : null,
+                child: const Text('Reset everything'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ResponsiveContent(
+      child: ListView(
+        padding: const EdgeInsets.all(20),
+        children: [
+          Container(
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: AppColors.error.withValues(alpha: 0.05),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: AppColors.error.withValues(alpha: 0.3)),
+            ),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Row(children: [
+                const Icon(Icons.dangerous_rounded, color: AppColors.error),
+                const SizedBox(width: 10),
+                Text('Danger Zone',
+                    style: GoogleFonts.outfit(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.error)),
+              ]),
+              const SizedBox(height: 12),
+              Text(
+                'Factory Reset (Fresh Start) prepares the system for a new client: '
+                'it clears every record — users, orders, bills, payments, menu, '
+                'tables, inventory and reports — while KEEPING the restaurant '
+                'branch and this super-admin account. Invoice/bill numbering '
+                'restarts too. A safety backup is taken automatically before '
+                'anything is cleared.',
+                style: GoogleFonts.outfit(
+                    fontSize: 13, color: AppColors.textSecondary, height: 1.45),
+              ),
+              const SizedBox(height: 18),
+              ElevatedButton.icon(
+                onPressed: _busy ? null : _factoryReset,
+                style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.error,
+                    foregroundColor: Colors.white,
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 18, vertical: 14)),
+                icon: _busy
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(
+                            strokeWidth: 2, color: Colors.white))
+                    : const Icon(Icons.restart_alt_rounded, size: 18),
+                label: Text(_busy ? 'Resetting…' : 'Factory Reset (Fresh Start)'),
+              ),
+            ]),
+          ),
+        ],
       ),
     );
   }

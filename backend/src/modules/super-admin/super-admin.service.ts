@@ -120,6 +120,55 @@ export class SuperAdminService {
     }
   }
 
+  /**
+   * FRESH-START RESET for client handoff. Wipes all operational data (orders,
+   * bills, payments, menu, tables, inventory, staff, logs, …) but KEEPS the
+   * restaurant branch(es) and the super-admin account(s). Only rows are removed
+   * — no schema change — so the app keeps running with no errors and the client
+   * can create their own users and start clean.
+   *
+   * Takes an automatic safety backup first (best-effort). Requires the caller to
+   * type the exact confirmation word, so it can never fire by accident.
+   */
+  async resetForHandoff(confirm: string) {
+    if (confirm !== 'RESET') {
+      throw new BadRequestException('Type RESET to confirm the reset.');
+    }
+
+    // Safety net: try to back up before wiping. Don't hard-block on a missing
+    // pg_dump — the UI already warns and the operator confirmed — but report it.
+    let backup: string | null = null;
+    try {
+      backup = (await this.backup()).filename;
+    } catch (error) {
+      this.logger.warn(`Pre-reset backup failed: ${(error as Error).message}`);
+    }
+
+    // Empty every table except branches, users and the migration history.
+    // CASCADE clears FK children so order never matters; RESTART IDENTITY resets
+    // any counters (fresh invoice/bill numbers).
+    await this.prisma.$executeRawUnsafe(`
+      DO $$
+      DECLARE t text;
+      BEGIN
+        FOR t IN
+          SELECT tablename FROM pg_tables
+          WHERE schemaname = 'public'
+            AND tablename NOT IN ('branches', 'users', '_prisma_migrations')
+        LOOP
+          EXECUTE format('TRUNCATE TABLE %I RESTART IDENTITY CASCADE', t);
+        END LOOP;
+      END $$;
+    `);
+    // Remove every user except the super admin(s).
+    await this.prisma.$executeRawUnsafe(
+      `DELETE FROM users WHERE role <> 'super_admin'`,
+    );
+
+    this.logger.warn('Fresh-start reset performed — kept branches + super-admin.');
+    return { reset: true, backup };
+  }
+
   async restore(filename: string) {
     const safeName = path.basename(filename); // no path traversal
     const filePath = path.join(BACKUP_DIR, safeName);

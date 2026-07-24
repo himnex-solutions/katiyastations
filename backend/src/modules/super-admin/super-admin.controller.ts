@@ -1,6 +1,7 @@
 import { Body, Controller, Get, Post, Query } from '@nestjs/common';
 import { SuperAdminService } from './super-admin.service';
 import { RestoreDto } from './dto/restore.dto';
+import { ResetDto } from './dto/reset.dto';
 import { Roles } from '../../common/decorators/roles.decorator';
 
 @Roles('super_admin')
@@ -41,5 +42,10 @@ export class SuperAdminController {
   @Post('restore')
   restore(@Body() dto: RestoreDto) {
     return this.superAdminService.restore(dto.filename);
+  }
+
+  @Post('reset')
+  reset(@Body() dto: ResetDto) {
+    return this.superAdminService.resetForHandoff(dto.confirm);
   }
 }

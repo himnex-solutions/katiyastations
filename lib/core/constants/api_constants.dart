@@ -189,6 +189,7 @@ class ApiConstants {
   static const String superAdminRestore = '/super-admin/restore';
   static const String superAdminLogs = '/super-admin/logs';
   static const String superAdminContainers = '/super-admin/containers';
+  static const String superAdminReset = '/super-admin/reset';
 
   // ── Uploads ────────────────────────────────────────────────
   static const String uploads = '/uploads';
