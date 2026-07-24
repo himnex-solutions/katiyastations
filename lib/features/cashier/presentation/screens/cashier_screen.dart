@@ -6,6 +6,7 @@ import '../../../../core/constants/app_colors.dart';
 import '../../../../core/constants/app_constants.dart';
 import '../../../../core/constants/api_constants.dart';
 import '../../../../core/network/api_client.dart';
+import '../../../../core/offline/connectivity_provider.dart';
 import '../../../../core/printing/print_actions.dart';
 import '../../../../core/printing/printer_status_pill.dart';
 import '../../../../core/utils/date_time_utils.dart';
@@ -13,6 +14,7 @@ import '../../../../core/utils/responsive_utils.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import '../../../tables/presentation/providers/tables_provider.dart';
+import '../../../orders/presentation/providers/order_provider.dart';
 import '../../../dashboard/presentation/screens/dashboard_screen.dart';
 import '../../../payment_history/presentation/screens/payment_history_screen.dart';
 import '../../../branches/presentation/providers/branch_provider.dart';
@@ -26,19 +28,16 @@ final sessionBillingProvider =
     FutureProvider.family<Map<String, dynamic>, String>((ref, sessionId) async {
   if (sessionId.isEmpty) return {'items': [], 'subtotal': 0.0, 'kots': []};
 
-  final response =
-      await ApiClient.instance.get(ApiConstants.kotsBySession(sessionId));
-  final kots = (response.data as List<dynamic>)
-      .cast<Map<String, dynamic>>()
-      .where((k) => k['status'] != 'cancelled')
+  // Reuse the offline-first KOT source (server KOTs when online, plus anything
+  // taken offline) so the cashier's bill loads instantly and works with no
+  // internet — instead of hanging on a direct API call that times out offline.
+  final kots = (await ref.watch(sessionKotsProvider(sessionId).future))
+      .where((k) => k.status != 'cancelled')
       .toList();
 
   final List<Map<String, dynamic>> allItems = [];
   for (final kot in kots) {
-    final items = (kot['items'] as List? ?? [])
-        .cast<Map<String, dynamic>>()
-        .where((i) => i['status'] != 'cancelled');
-    allItems.addAll(items);
+    allItems.addAll(kot.items.where((i) => i['status'] != 'cancelled'));
   }
 
   final Map<String, Map<String, dynamic>> aggregated = {};
@@ -2430,6 +2429,16 @@ class _CashierScreenState extends ConsumerState<CashierScreen>
       List items,
       Map<String, dynamic> data) async {
     if (_selectedSessionId == null || _selectedTableId == null) return;
+    // Settling a bill (invoice number, payment, stock) must happen on the
+    // server — don't hang for the network timeout offline; say so at once.
+    if (!ref.read(connectivityProvider)) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        backgroundColor: AppColors.warning,
+        behavior: SnackBarBehavior.floating,
+        content: Text('Settling a bill needs an internet connection. Reconnect and try again.'),
+      ));
+      return;
+    }
     setState(() => _processing = true);
     try {
       final amountPaid = _paymentMethod == 'cash'

@@ -110,11 +110,27 @@ final activeSessionsStreamProvider = FutureProvider<List<TableSession>>((ref) as
 // ─── Session for a specific table ─────────────────────────────────────────
 final tableSessionProvider =
     FutureProvider.family<TableSession?, String>((ref, tableId) async {
-  // Offline: only a session opened on this device is known — return it at once
-  // rather than stalling on a network call that will time out.
+  // Offline: resolve the session from local data instead of stalling on a
+  // network call that will time out.
   if (!ref.read(connectivityProvider)) {
+    // 1) A session opened offline on THIS device.
     final offline = await OfflineCache.instance.getOfflineSession(tableId);
-    return offline != null ? TableSession.fromJson(offline) : null;
+    if (offline != null) return TableSession.fromJson(offline);
+    // 2) A server session cached from the last online load — without this, an
+    //    occupied table (opened on the server) couldn't be entered while
+    //    offline because its session was invisible here.
+    final branchId = ref.read(authNotifierProvider).value?.branchId;
+    if (branchId != null) {
+      final cached = await OfflineCache.instance.get(CacheKeys.openSessions(branchId));
+      if (cached is List) {
+        for (final r in cached) {
+          if (r is Map && r['table_id'] == tableId) {
+            return TableSession.fromJson(Map<String, dynamic>.from(r));
+          }
+        }
+      }
+    }
+    return null;
   }
   try {
     final response =

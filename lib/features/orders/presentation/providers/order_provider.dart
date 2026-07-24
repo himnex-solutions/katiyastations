@@ -305,7 +305,16 @@ class OrderNotifier extends StateNotifier<List<CartItem>> {
             })
         .toList();
 
-    if (_ref.read(connectivityProvider)) {
+    // If this table's session was opened offline and hasn't reached the server
+    // yet, the backend doesn't know it — sending online would 404 ("session not
+    // found"). Keep the KOT local so it uploads *after* the session (in order),
+    // even though we're back online. Once the session syncs it's removed from
+    // this cache, so later KOTs go straight to the server as normal.
+    final offlineSession = await OfflineCache.instance.getOfflineSession(tableId);
+    final sessionPendingOffline =
+        offlineSession != null && offlineSession['id'] == sessionId;
+
+    if (_ref.read(connectivityProvider) && !sessionPendingOffline) {
       try {
         final response = await ApiClient.instance.post(
           ApiConstants.kots,
