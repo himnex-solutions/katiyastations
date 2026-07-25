@@ -74,9 +74,9 @@ const List<NavItem> allNavItems = [
   NavItem(label: 'Menu', icon: Icons.restaurant_menu, activeIcon: Icons.restaurant_menu, path: '/menu',
       allowedRoles: ['branch_manager', 'cashier']),
   NavItem(label: 'Inventory', icon: Icons.inventory_2, activeIcon: Icons.inventory_2, path: '/inventory',
-      allowedRoles: ['branch_manager', 'inventory']),
+      allowedRoles: ['branch_manager', 'cashier', 'inventory']),
   NavItem(label: 'Bar', icon: Icons.wine_bar, activeIcon: Icons.wine_bar, path: '/bar',
-      allowedRoles: ['inventory']),
+      allowedRoles: ['branch_manager', 'cashier', 'inventory']),
   NavItem(label: 'Purchases', icon: Icons.shopping_cart, activeIcon: Icons.shopping_cart, path: '/purchases',
       allowedRoles: ['branch_manager', 'inventory']),
   NavItem(label: 'Expenses', icon: Icons.payments, activeIcon: Icons.payments, path: '/expenses',
@@ -106,7 +106,7 @@ const List<NavItem> allNavItems = [
   NavItem(label: 'Loyalty', icon: Icons.star, activeIcon: Icons.star, path: '/loyalty',
       allowedRoles: ['branch_manager', 'cashier']),
   NavItem(label: 'Suppliers', icon: Icons.local_shipping, activeIcon: Icons.local_shipping, path: '/suppliers',
-      allowedRoles: ['branch_manager', 'inventory']),
+      allowedRoles: ['branch_manager', 'cashier', 'inventory']),
   // Branch creation/management is a super-admin-only concern — managers run a
   // branch, they don't add or remove them.
   NavItem(label: 'Branches', icon: Icons.store, activeIcon: Icons.store, path: '/branches',

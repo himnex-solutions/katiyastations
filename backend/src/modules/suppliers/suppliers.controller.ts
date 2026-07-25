@@ -6,7 +6,7 @@ import { BranchFilterDto } from '../../common/dto/branch-filter.dto';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { CurrentUser, CurrentUserPayload } from '../../common/decorators/current-user.decorator';
 
-@Roles('super_admin', 'branch_manager', 'inventory', 'accountant')
+@Roles('super_admin', 'branch_manager', 'cashier', 'inventory', 'accountant')
 @Controller('suppliers')
 export class SuppliersController {
   constructor(private readonly suppliersService: SuppliersService) {}
