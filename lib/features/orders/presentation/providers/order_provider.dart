@@ -7,6 +7,7 @@ import '../../../../core/offline/offline_cache.dart';
 import '../../../../core/offline/offline_store.dart'; // OfflineKot/Item models
 import '../../../../core/offline/offline_ids.dart';
 import '../../../../core/offline/sync_engine.dart';
+import '../../../../core/offline/menu_image_precache.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
 import '../../../menu/domain/entities/menu_entities.dart';
 import '../../../tables/presentation/providers/tables_provider.dart';
@@ -86,6 +87,17 @@ final allMenuItemsProvider =
     () => _getRows(ApiConstants.menuItems, {'branchId': branchId}),
     _availableItems,
   );
+});
+
+/// Side-effect provider: while online, downloads every menu image so the waiter
+/// sees them ALL offline — not just the ones that happened to load. Re-runs
+/// cheaply (already-cached images are skipped) and no-ops offline. Watch it
+/// from the shell so it warms the cache as soon as a user is signed in.
+final menuImagePrecacheProvider =
+    FutureProvider.family<void, String>((ref, branchId) async {
+  if (!ref.watch(connectivityProvider)) return;
+  final items = await ref.watch(allMenuItemsProvider(branchId).future);
+  await precacheMenuImages(items.map((i) => i.imageUrl));
 });
 
 KotWithItems _kotWithItemsFromJson(Map<String, dynamic> json) => KotWithItems(

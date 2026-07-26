@@ -12,6 +12,7 @@ import '../printing/kot_auto_print.dart';
 import '../printing/printer_config.dart';
 import '../printing/printer_status.dart';
 import '../offline/connectivity_provider.dart';
+import '../../features/orders/presentation/providers/order_provider.dart';
 import 'offline_banner.dart';
 
 /// Human label for a role — shared by the desktop rail footer and the mobile
@@ -68,6 +69,11 @@ class AppShell extends ConsumerWidget {
     ref.watch(kotPrinterStatusProvider);
     final profileAsync = ref.watch(authNotifierProvider);
     final profile = profileAsync.value;
+    // While online, pre-download every menu image so ALL of them show offline
+    // on the waiter's order screen — not only the ones already scrolled past.
+    if (profile?.branchId != null) {
+      ref.watch(menuImagePrecacheProvider(profile!.branchId!));
+    }
     final navItems = getNavItemsForRole(profile?.role);
     final isWide = ResponsiveBreakpoints.of(context).isDesktop;
 

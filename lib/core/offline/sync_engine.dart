@@ -159,5 +159,11 @@ class SyncEngine {
     _ref.invalidate(dashboardCreditProvider);
     _ref.invalidate(billsStreamProvider); // payment history (whole family)
     _ref.invalidate(onlineOrdersProvider);
+    // Reference data that another device may have changed while we were offline
+    // — most importantly menu prices, so an offline-cached price can't linger.
+    _ref.invalidate(menuCategoriesProvider); // whole family
+    _ref.invalidate(menuItemsProvider); // whole family
+    _ref.invalidate(allMenuItemsProvider); // whole family
+    _ref.invalidate(reservationsStreamProvider);
   }
 }

@@ -53,6 +53,10 @@ dependencies:
   # Disk-persisted network images — menu photos keep showing when the internet
   # is down (Image.network only caches in memory, so it went blank offline).
   cached_network_image: ^3.4.1
+  # Same disk cache CachedNetworkImage uses — imported directly so we can
+  # pre-download EVERY menu image while online, so all of them show offline
+  # (not just the ones a waiter happened to scroll past).
+  flutter_cache_manager: ^3.4.1
   fl_chart: ^0.67.0
   gap: ^3.0.1
 
