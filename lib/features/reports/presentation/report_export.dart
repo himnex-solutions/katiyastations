@@ -12,6 +12,7 @@ import 'dart:typed_data';
 
 import 'package:excel/excel.dart' hide Border, BorderStyle;
 import 'package:file_saver/file_saver.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/services.dart' show MissingPluginException;
 import 'package:intl/intl.dart';
 import 'package:pdf/pdf.dart';
@@ -19,6 +20,9 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 
 import '../../../core/utils/date_time_utils.dart';
+// Native writes straight to the Downloads folder; on web this is a no-op stub
+// and the browser handles the download instead.
+import 'report_saver_stub.dart' if (dart.library.io) 'report_saver_io.dart' as saver;
 
 /// Non-error signal shown to the user as an info message rather than a
 /// failure — e.g. when printing falls back to a PDF download.
@@ -29,17 +33,29 @@ class ExportNotice implements Exception {
   String toString() => message;
 }
 
-/// Cross-platform byte save/download that does NOT use a plugin method
-/// channel (file_saver web uses direct browser APIs), so it works even
-/// when other native plugins aren't registered.
-Future<void> _saveBytes(Uint8List bytes, String name, String ext, MimeType mime) async {
+/// Saves [bytes] and returns where they went:
+///   • a real filesystem path  → desktop/mobile, written to the Downloads folder
+///   • an empty string ('')     → web/file_saver browser download (no local path)
+///
+/// On desktop the click therefore downloads immediately to Downloads with no
+/// picker. Falls back to file_saver if the direct write isn't possible.
+Future<String> _saveBytes(Uint8List bytes, String name, String ext, MimeType mime) async {
+  if (!kIsWeb) {
+    final path = await saver.savePlatformFile(bytes, name, ext);
+    if (path != null) return path;
+    // Direct write failed — fall through to file_saver below.
+  }
   await FileSaver.instance.saveFile(
     name: name,
     bytes: bytes,
     fileExtension: ext,
     mimeType: mime,
   );
+  return '';
 }
+
+/// Opens the OS file explorer at the saved report (native only; no-op on web).
+Future<void> openReportFolder(String path) => saver.openContainingFolder(path);
 
 // ── Report model ────────────────────────────────────────────
 
@@ -95,10 +111,10 @@ class ReportData {
 final _money = NumberFormat('#,##0.00');
 String _npr(double v) => 'NPR ${_money.format(v)}';
 String _rangeLabel(ReportData d) =>
-    '${DateFormat('dd MMM yyyy').format(d.rangeStart)}  –  ${DateFormat('dd MMM yyyy').format(d.rangeEnd)}';
+    '${DateFormat('dd MMM yyyy').format(d.rangeStart)}  -  ${DateFormat('dd MMM yyyy').format(d.rangeEnd)}';
 
 String _prettyMethod(String raw) {
-  if (raw.isEmpty) return '—';
+  if (raw.isEmpty) return '-';
   return raw
       .split('_')
       .map((w) => w.isEmpty ? w : '${w[0].toUpperCase()}${w.substring(1)}')
@@ -107,30 +123,35 @@ String _prettyMethod(String raw) {
 
 // ── Public actions ──────────────────────────────────────────
 
-Future<void> printReport(ReportData data) async {
+/// Prints via the native dialog. Returns null on success (nothing saved); on a
+/// build without the printing plugin it saves a PDF and throws [ExportNotice].
+Future<String?> printReport(ReportData data) async {
   final bytes = await buildReportPdf(data);
   try {
     await Printing.layoutPdf(onLayout: (_) async => bytes, name: data.fileName);
+    return null;
   } on MissingPluginException {
     // The printing plugin isn't registered on this build (a newly added
     // plugin needs a full app rebuild, not a hot restart). Rather than
     // failing, hand the user the PDF to open and print themselves.
-    await _saveBytes(bytes, data.fileName, 'pdf', MimeType.pdf);
+    final where = await _saveBytes(bytes, data.fileName, 'pdf', MimeType.pdf);
     throw ExportNotice(
-        'Printing isn’t available on this build — the report was downloaded as a PDF instead. Open it and print from there.');
+        'Printing isn’t available on this build — the report was downloaded as a PDF instead${where.isNotEmpty ? ' to:\n$where' : ''}. Open it and print from there.');
   }
 }
 
-Future<void> downloadReportPdf(ReportData data) async {
+/// Downloads the report as a PDF. Returns the saved file path (desktop/mobile)
+/// or '' when the browser handled the download (web).
+Future<String> downloadReportPdf(ReportData data) async {
   final bytes = await buildReportPdf(data);
-  // Deliver via file_saver (no plugin method channel) so this works even
-  // where Printing.sharePdf would throw MissingPluginException.
-  await _saveBytes(bytes, data.fileName, 'pdf', MimeType.pdf);
+  return _saveBytes(bytes, data.fileName, 'pdf', MimeType.pdf);
 }
 
-Future<void> downloadReportExcel(ReportData data) async {
+/// Downloads the report as an Excel workbook. Returns the saved file path
+/// (desktop/mobile) or '' when the browser handled the download (web).
+Future<String> downloadReportExcel(ReportData data) async {
   final bytes = buildReportExcel(data);
-  await _saveBytes(Uint8List.fromList(bytes), data.fileName, 'xlsx', MimeType.microsoftExcel);
+  return _saveBytes(Uint8List.fromList(bytes), data.fileName, 'xlsx', MimeType.microsoftExcel);
 }
 
 // ── PDF ─────────────────────────────────────────────────────
@@ -139,8 +160,28 @@ final PdfColor _brand = PdfColor.fromHex('#B3122A');
 final PdfColor _ink = PdfColor.fromHex('#1C1C1E');
 final PdfColor _muted = PdfColor.fromHex('#6B7280');
 
+/// A Unicode-capable font theme for the report. The pdf package's built-in
+/// Helvetica only covers WinAnsi, so ANY other character — an accented/Nepali
+/// name, a currency symbol, or the narrow no-break space (U+202F) that modern
+/// `intl` puts in formatted times — makes it log "Helvetica has no Unicode
+/// support" and drop the glyph. Noto Sans (fetched + cached by the printing
+/// package) draws them all. Falls back to the built-in font if it can't be
+/// fetched (fully offline) — report generation needs the server anyway, so in
+/// practice the font is always reachable when a report is built.
+Future<pw.ThemeData?> _reportTheme() async {
+  try {
+    return pw.ThemeData.withFont(
+      base: await PdfGoogleFonts.notoSansRegular(),
+      bold: await PdfGoogleFonts.notoSansBold(),
+      italic: await PdfGoogleFonts.notoSansItalic(),
+    );
+  } catch (_) {
+    return null; // built-in Helvetica; content is otherwise ASCII
+  }
+}
+
 Future<Uint8List> buildReportPdf(ReportData d) async {
-  final doc = pw.Document(title: d.fileName);
+  final doc = pw.Document(title: d.fileName, theme: await _reportTheme());
   final good = d.highlightGoodWhenPositive
       ? d.highlightValue >= 0
       : d.highlightValue <= 0;
@@ -155,7 +196,7 @@ Future<Uint8List> buildReportPdf(ReportData d) async {
         alignment: pw.Alignment.centerRight,
         margin: const pw.EdgeInsets.only(top: 8),
         child: pw.Text(
-          'Katiya Station RMS   •   Page ${ctx.pageNumber} of ${ctx.pagesCount}',
+          'Katiya Station RMS   |   Page ${ctx.pageNumber} of ${ctx.pagesCount}',
           style: pw.TextStyle(fontSize: 8, color: _muted),
         ),
       ),
@@ -202,7 +243,7 @@ pw.Widget _pdfHeader(ReportData d) {
             pw.Text('KATIYA STATION',
                 style: pw.TextStyle(
                     color: PdfColors.white, fontSize: 20, fontWeight: pw.FontWeight.bold, letterSpacing: 1.5)),
-            pw.Text('Restaurant & Bar — Management System',
+            pw.Text('Restaurant & Bar - Management System',
                 style: const pw.TextStyle(color: PdfColors.white, fontSize: 9)),
           ],
         ),
@@ -231,9 +272,9 @@ pw.Widget _pdfRunningHeader(ReportData d) => pw.Container(
       child: pw.Row(
         mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
         children: [
-          pw.Text('Katiya Station — ${d.title}',
+          pw.Text('Katiya Station - ${d.title}',
               style: pw.TextStyle(fontSize: 9, color: _brand, fontWeight: pw.FontWeight.bold)),
-          pw.Text('${d.timeframe}  •  ${_rangeLabel(d)}',
+          pw.Text('${d.timeframe}  |  ${_rangeLabel(d)}',
               style: pw.TextStyle(fontSize: 8, color: _muted)),
         ],
       ),
@@ -314,8 +355,8 @@ pw.Widget _pdfTransactionsTable(ReportData d) {
     data: d.transactions.map((b) {
       final dt = DateTime.tryParse(b['created_at'] as String? ?? '');
       return [
-        dt != null ? formatCompactDateTime(dt) : '—',
-        (b['bill_number'] as String?) ?? '—',
+        dt != null ? formatCompactDateTime(dt) : '-',
+        (b['bill_number'] as String?) ?? '-',
         _prettyMethod((b['payment_method'] as String?) ?? ''),
         _prettyMethod((b['payment_status'] as String?) ?? ''),
         _npr((b['total_amount'] as num?)?.toDouble() ?? 0),
@@ -407,10 +448,10 @@ List<int> buildReportExcel(ReportData d) {
   }
 
   // Title band
-  put(0, r, TextCellValue('KATIYA STATION — ${d.title}'), style: titleStyle);
+  put(0, r, TextCellValue('KATIYA STATION - ${d.title}'), style: titleStyle);
   mergeRow(r, 0, 4);
   r++;
-  put(0, r, TextCellValue('Restaurant & Bar — Management System'), style: subStyle);
+  put(0, r, TextCellValue('Restaurant & Bar - Management System'), style: subStyle);
   mergeRow(r, 0, 4);
   r += 2;
 
@@ -481,8 +522,8 @@ List<int> buildReportExcel(ReportData d) {
     r++;
     for (final b in d.transactions) {
       final dt = DateTime.tryParse(b['created_at'] as String? ?? '');
-      put(0, r, TextCellValue(dt != null ? formatCompactDateTime(dt) : '—'));
-      put(1, r, TextCellValue((b['bill_number'] as String?) ?? '—'));
+      put(0, r, TextCellValue(dt != null ? formatCompactDateTime(dt) : '-'));
+      put(1, r, TextCellValue((b['bill_number'] as String?) ?? '-'));
       put(2, r, TextCellValue(_prettyMethod((b['payment_method'] as String?) ?? '')));
       put(3, r, TextCellValue(_prettyMethod((b['payment_status'] as String?) ?? '')));
       put(4, r, DoubleCellValue((b['total_amount'] as num?)?.toDouble() ?? 0), style: valueStyle);

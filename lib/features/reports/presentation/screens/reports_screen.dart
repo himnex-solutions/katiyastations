@@ -161,12 +161,29 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
     );
   }
 
-  Future<void> _export(Future<void> Function(ReportData) action, String label) async {
+  Future<void> _export(Future<String?> Function(ReportData) action, String label) async {
     if (_summary == null || _exporting) return;
     setState(() => _exporting = true);
     final messenger = ScaffoldMessenger.of(context);
     try {
-      await action(_buildReportData());
+      final result = await action(_buildReportData());
+      // null → a print job (no file). A non-null path → downloaded: tell the
+      // user exactly where, with a shortcut to open the folder.
+      if (result != null && mounted) {
+        final saved = result.isNotEmpty;
+        messenger.showSnackBar(SnackBar(
+          content: Text(saved ? '$label saved to:\n$result' : '$label complete — check your downloads.'),
+          backgroundColor: AppColors.success,
+          duration: const Duration(seconds: 6),
+          action: saved
+              ? SnackBarAction(
+                  label: 'Open folder',
+                  textColor: Colors.white,
+                  onPressed: () => openReportFolder(result),
+                )
+              : null,
+        ));
+      }
     } on ExportNotice catch (n) {
       // Expected fallback (e.g. print → PDF download); inform, don't alarm.
       messenger.showSnackBar(
