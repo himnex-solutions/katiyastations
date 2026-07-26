@@ -1214,15 +1214,23 @@ class _MenuManagementScreenState extends ConsumerState<MenuManagementScreen> {
       final resultData = response.data as Map<String, dynamic>;
       final created = (resultData['created'] as num?)?.toInt() ?? 0;
       final skipped = (resultData['skipped'] as num?)?.toInt() ?? 0;
+      // Rows whose name + price already exist (a re-upload, or listed twice).
+      final duplicates = (resultData['duplicates'] as num?)?.toInt() ?? 0;
 
       closeLoader();
       _refreshMenuCaches(ref);
 
-      final skippedNote =
-          skipped > 0 ? ' · $skipped row${skipped == 1 ? '' : 's'} skipped' : '';
+      final notes = <String>[
+        if (duplicates > 0)
+          '$duplicates duplicate${duplicates == 1 ? '' : 's'} already on menu — skipped',
+        if (skipped > 0) '$skipped row${skipped == 1 ? '' : 's'} skipped (missing name/price/category)',
+      ];
+      final noteStr = notes.isEmpty ? '' : ' · ${notes.join(' · ')}';
       _toast(
-        'Uploaded successfully — $created item${created == 1 ? '' : 's'} added$skippedNote',
-        background: AppColors.success,
+        created == 0 && duplicates > 0
+            ? 'Nothing new added — all $duplicates item${duplicates == 1 ? '' : 's'} are already on the menu.'
+            : 'Uploaded — $created item${created == 1 ? '' : 's'} added$noteStr',
+        background: created == 0 && duplicates > 0 ? AppColors.warning : AppColors.success,
       );
     } catch (e) {
       closeLoader();

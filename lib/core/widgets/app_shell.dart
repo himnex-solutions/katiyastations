@@ -9,6 +9,8 @@ import '../../features/auth/presentation/providers/auth_provider.dart';
 import '../../router/app_router.dart';
 import '../network/realtime_sync.dart';
 import '../printing/kot_auto_print.dart';
+import '../printing/printer_config.dart';
+import '../printing/printer_status.dart';
 import '../offline/connectivity_provider.dart';
 import 'offline_banner.dart';
 
@@ -56,6 +58,14 @@ class AppShell extends ConsumerWidget {
     // Starts connectivity monitoring for the whole session — drives the
     // offline banner and flushes the offline order queue on reconnect.
     ref.watch(connectivityProvider);
+    // Hydrate BOTH printer setups (receipt + KOT) from storage the moment the
+    // app opens / a user logs in, and keep a live reachability probe running —
+    // so a correctly-configured LAN printer is connected and ready to print
+    // without anyone opening Settings first. No-op on web / when unconfigured.
+    ref.watch(receiptPrinterConfigProvider);
+    ref.watch(kotPrinterConfigProvider);
+    ref.watch(receiptPrinterStatusProvider);
+    ref.watch(kotPrinterStatusProvider);
     final profileAsync = ref.watch(authNotifierProvider);
     final profile = profileAsync.value;
     final navItems = getNavItemsForRole(profile?.role);
@@ -151,12 +161,13 @@ class AppShell extends ConsumerWidget {
     );
   }
 
-  /// Puts the global offline / sync status strip above whatever screen is
-  /// currently showing under the shell.
+  /// Puts the global offline / sync status strip at the BOTTOM of whatever
+  /// screen is showing — just above the navigation bar — so it never covers or
+  /// pushes down the screen's own app bar (title, tabs, notification bell).
   Widget _withBanner(Widget child) => Column(
         children: [
-          const OfflineBanner(),
           Expanded(child: child),
+          const OfflineBanner(),
         ],
       );
 

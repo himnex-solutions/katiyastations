@@ -63,7 +63,7 @@ class BarScreen extends ConsumerWidget {
           TextButton.icon(
             icon: const Icon(Icons.add_rounded, size: 18),
             label: const Text('Add Stock'),
-            onPressed: () => _showAddDialog(context, ref),
+            onPressed: () => showBarStockDialog(context, ref),
           ),
           const NotificationBell(),
         ],
@@ -124,16 +124,28 @@ class BarScreen extends ConsumerWidget {
     );
   }
 
-  void _showAddDialog(BuildContext context, WidgetRef ref) {
-    final nameCtrl = TextEditingController();
-    final bottlesCtrl = TextEditingController(text: '0');
-    final capCtrl = TextEditingController(text: '750');
-    final priceCtrl = TextEditingController(text: '0');
-    String category = 'spirits';
+}
 
-    showDialog(context: context, builder: (ctx) => AlertDialog(
-      title: const Text('Add Bar Stock'),
-      content: StatefulBuilder(builder: (ctx, set) => Column(mainAxisSize: MainAxisSize.min, children: [
+/// Add a new bottle, or edit an existing one when [existing] is passed. The
+/// same form serves both; on edit it PATCHes and omits branchId (a bottle
+/// never moves branches).
+void showBarStockDialog(BuildContext context, WidgetRef ref, {BarStockItem? existing}) {
+  final isEdit = existing != null;
+  final nameCtrl = TextEditingController(text: existing?.name ?? '');
+  final bottlesCtrl =
+      TextEditingController(text: (existing?.currentBottles ?? 0).toString());
+  final capCtrl =
+      TextEditingController(text: (existing?.bottleCapacityMl ?? 750).toStringAsFixed(0));
+  final pegCtrl =
+      TextEditingController(text: (existing?.pegsMl ?? 30).toStringAsFixed(0));
+  final priceCtrl =
+      TextEditingController(text: (existing?.pricePerPeg ?? 0).toStringAsFixed(0));
+  String category = existing?.category ?? 'spirits';
+
+  showDialog(context: context, builder: (ctx) => AlertDialog(
+    title: Text(isEdit ? 'Edit Bar Stock' : 'Add Bar Stock'),
+    content: StatefulBuilder(builder: (ctx, set) => SingleChildScrollView(
+      child: Column(mainAxisSize: MainAxisSize.min, children: [
         TextField(controller: nameCtrl, decoration: const InputDecoration(labelText: 'Name (e.g. Old Monk Rum)')),
         const SizedBox(height: 12),
         DropdownButtonFormField<String>(
@@ -154,32 +166,79 @@ class BarScreen extends ConsumerWidget {
           Expanded(child: TextField(controller: capCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Capacity (ml)'))),
         ]),
         const SizedBox(height: 12),
-        TextField(controller: priceCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Price per Peg (NPR)')),
-      ])),
-      actions: [
-        TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
-        ElevatedButton(
-          onPressed: () async {
-            final profile = ref.read(authNotifierProvider).value;
-            await ApiClient.instance.post(
-              ApiConstants.barStock,
-              data: {
-                'branchId': profile?.branchId,
-                'name': nameCtrl.text.trim(),
-                'category': category,
-                'bottleCapacityMl': double.tryParse(capCtrl.text) ?? 750,
-                'currentBottles': double.tryParse(bottlesCtrl.text) ?? 0,
-                'pegsMl': 30.0,
-                'pricePerPeg': double.tryParse(priceCtrl.text) ?? 0,
-              },
-            );
+        Row(children: [
+          Expanded(child: TextField(controller: pegCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Peg size (ml)'))),
+          const SizedBox(width: 12),
+          Expanded(child: TextField(controller: priceCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Price/Peg (NPR)'))),
+        ]),
+      ]),
+    )),
+    actions: [
+      TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+      ElevatedButton(
+        onPressed: () async {
+          final name = nameCtrl.text.trim();
+          if (name.isEmpty) return;
+          final profile = ref.read(authNotifierProvider).value;
+          final data = <String, dynamic>{
+            if (!isEdit) 'branchId': profile?.branchId,
+            'name': name,
+            'category': category,
+            'bottleCapacityMl': double.tryParse(capCtrl.text) ?? 750,
+            'currentBottles': double.tryParse(bottlesCtrl.text) ?? 0,
+            'pegsMl': double.tryParse(pegCtrl.text) ?? 30,
+            'pricePerPeg': double.tryParse(priceCtrl.text) ?? 0,
+          };
+          try {
+            if (isEdit) {
+              await ApiClient.instance.patch(ApiConstants.barStockById(existing.id), data: data);
+            } else {
+              await ApiClient.instance.post(ApiConstants.barStock, data: data);
+            }
             ref.invalidate(barStockProvider);
-            if (context.mounted) Navigator.pop(ctx);
-          },
-          child: const Text('Add'),
+            if (ctx.mounted) Navigator.pop(ctx);
+          } catch (e) {
+            if (ctx.mounted) {
+              ScaffoldMessenger.of(ctx).showSnackBar(
+                  SnackBar(backgroundColor: AppColors.error, content: Text('Failed: $e')));
+            }
+          }
+        },
+        child: Text(isEdit ? 'Save' : 'Add'),
+      ),
+    ],
+  ));
+}
+
+/// Confirm, then permanently delete a bottle from Bar Inventory.
+Future<void> confirmDeleteBarStock(
+    BuildContext context, WidgetRef ref, BarStockItem item) async {
+  final messenger = ScaffoldMessenger.of(context);
+  final ok = await showDialog<bool>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      title: const Text('Delete Bar Stock?'),
+      content: Text(
+          'Permanently remove "${item.name}" from Bar Inventory? This cannot be undone.'),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+        ElevatedButton(
+          style: ElevatedButton.styleFrom(backgroundColor: AppColors.error, foregroundColor: Colors.white),
+          onPressed: () => Navigator.pop(ctx, true),
+          child: const Text('Delete'),
         ),
       ],
-    ));
+    ),
+  );
+  if (ok != true) return;
+  try {
+    await ApiClient.instance.delete(ApiConstants.barStockById(item.id));
+    ref.invalidate(barStockProvider);
+    messenger.showSnackBar(SnackBar(
+        backgroundColor: AppColors.success, content: Text('"${item.name}" deleted.')));
+  } catch (e) {
+    messenger.showSnackBar(
+        SnackBar(backgroundColor: AppColors.error, content: Text('Delete failed: $e')));
   }
 }
 
@@ -222,6 +281,23 @@ class _BarStockCard extends StatelessWidget {
           Text('${item.currentBottles}', style: GoogleFonts.outfit(fontSize: 20, fontWeight: FontWeight.w700, color: AppColors.primary)),
           Text('bottles', style: GoogleFonts.outfit(fontSize: 11, color: AppColors.textSecondary)),
         ]),
+        PopupMenuButton<String>(
+          icon: const Icon(Icons.more_vert_rounded, color: AppColors.textSecondary),
+          onSelected: (v) {
+            if (v == 'edit') showBarStockDialog(context, ref, existing: item);
+            if (v == 'delete') confirmDeleteBarStock(context, ref, item);
+          },
+          itemBuilder: (_) => const [
+            PopupMenuItem(value: 'edit', child: Row(children: [
+              Icon(Icons.edit_rounded, size: 18, color: AppColors.textSecondary),
+              SizedBox(width: 10), Text('Edit'),
+            ])),
+            PopupMenuItem(value: 'delete', child: Row(children: [
+              Icon(Icons.delete_outline_rounded, size: 18, color: AppColors.error),
+              SizedBox(width: 10), Text('Delete', style: TextStyle(color: AppColors.error)),
+            ])),
+          ],
+        ),
       ]),
     );
   }

@@ -41,7 +41,11 @@ class OfflineBanner extends ConsumerWidget {
 
     return Material(
       color: color.withValues(alpha: 0.12),
-      child: SafeArea(
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          border: Border(top: BorderSide(color: color.withValues(alpha: 0.35))),
+        ),
+        child: SafeArea(
         top: false,
         bottom: false,
         child: Padding(
@@ -64,6 +68,7 @@ class OfflineBanner extends ConsumerWidget {
               ),
             ],
           ),
+        ),
         ),
       ),
     );

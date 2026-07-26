@@ -14,12 +14,15 @@ import '../network/api_client.dart';
 import 'offline_cache.dart';
 import 'offline_store.dart'; // provides OfflineStore + SyncQueueItem
 
-// Providers whose data is refreshed after a drain, so synced orders/tables
-// appear immediately (the socket also pushes them, this covers the gap).
+// Providers whose data is refreshed after a drain — and on every reconnect —
+// so synced orders/tables/bills appear immediately without a logout/login (the
+// socket also pushes them, this covers the gap while catching up).
 import '../../features/tables/presentation/providers/tables_provider.dart';
 import '../../features/orders/presentation/providers/order_provider.dart';
 import '../../features/dashboard/presentation/screens/dashboard_screen.dart';
 import '../../features/kitchen/presentation/providers/kitchen_provider.dart';
+import '../../features/payment_history/presentation/screens/payment_history_screen.dart';
+import '../../features/cashier/presentation/screens/online_orders_screen.dart';
 
 enum _Replay { ok, transient, permanentFail }
 
@@ -50,7 +53,6 @@ class SyncEngine {
   Future<void> syncNow() async {
     if (_running || !OfflineStore.instance.isReady) return;
     _running = true;
-    var changed = false;
     try {
       final ops = await OfflineStore.instance.pendingOps();
       for (final op in ops) {
@@ -58,11 +60,9 @@ class SyncEngine {
         if (result == _Replay.ok) {
           await _cleanupAfterSync(op);
           await OfflineStore.instance.deleteOp(op.id!);
-          changed = true;
         } else if (result == _Replay.permanentFail) {
           op.isFailed = true;
           await OfflineStore.instance.saveOp(op);
-          changed = true;
         } else {
           // Transient (offline again / server down / token refreshing) — stop
           // here and retry the rest on the next connectivity event.
@@ -73,7 +73,11 @@ class SyncEngine {
     } finally {
       _running = false;
     }
-    if (changed) _refreshProviders();
+    // Always refresh — not only when something was uploaded. Coming back online
+    // after merely *viewing* screens offline still needs the latest server data
+    // pulled in (other devices may have changed tables/bills/orders meanwhile),
+    // which is the "stale until I log out and back in" case.
+    _refreshProviders();
     await _ref.read(pendingSyncProvider.notifier).refresh();
   }
 
@@ -141,12 +145,19 @@ class SyncEngine {
   }
 
   void _refreshProviders() {
+    // Waiter / tables + orders
     _ref.invalidate(tablesStreamProvider);
     _ref.invalidate(activeSessionsStreamProvider);
     _ref.invalidate(tableSessionProvider); // whole family
     _ref.invalidate(sessionKotsProvider); // whole family
+    // Kitchen
+    _ref.invalidate(kitchenKotsProvider);
+    // Dashboard + cashier (sales, credit, bills, online orders)
     _ref.invalidate(dashboardSessionsProvider);
     _ref.invalidate(dashboardKotsProvider);
-    _ref.invalidate(kitchenKotsProvider);
+    _ref.invalidate(dashboardBillsProvider);
+    _ref.invalidate(dashboardCreditProvider);
+    _ref.invalidate(billsStreamProvider); // payment history (whole family)
+    _ref.invalidate(onlineOrdersProvider);
   }
 }

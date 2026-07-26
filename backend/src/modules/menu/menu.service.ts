@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import * as ExcelJS from 'exceljs';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateCategoryDto } from './dto/create-category.dto';
@@ -70,7 +70,35 @@ export class MenuService {
     return item;
   }
 
+  /**
+   * A menu item is a duplicate only when BOTH its name (case-insensitive) and
+   * price already exist in the branch. Same name at a different price is
+   * allowed on purpose — e.g. "Chicken Momo" half plate 180 vs full plate 300.
+   */
+  private async assertNotDuplicate(
+    branchId: string,
+    name: string,
+    price: number,
+    ignoreId?: string,
+  ) {
+    const existing = await this.prisma.menuItem.findFirst({
+      where: {
+        branchId,
+        name: { equals: name.trim(), mode: 'insensitive' },
+        price,
+        ...(ignoreId ? { id: { not: ignoreId } } : {}),
+      },
+    });
+    if (existing) {
+      throw new ConflictException(
+        `"${name.trim()}" at NPR ${price} is already on the menu. ` +
+          `Use a different price for a half/full plate, or edit the existing item.`,
+      );
+    }
+  }
+
   async createItem(dto: CreateMenuItemDto) {
+    await this.assertNotDuplicate(dto.branchId, dto.name, dto.price);
     const item = await this.prisma.menuItem.create({ data: dto });
     this.realtime.menuChanged(item.branchId, {
       action: 'item_created',
@@ -81,7 +109,15 @@ export class MenuService {
   }
 
   async updateItem(id: string, dto: UpdateMenuItemDto) {
-    await this.findItem(id);
+    const current = await this.findItem(id);
+    if (dto.name !== undefined || dto.price !== undefined) {
+      await this.assertNotDuplicate(
+        current.branchId,
+        dto.name ?? current.name,
+        dto.price ?? Number(current.price),
+        id,
+      );
+    }
     const item = await this.prisma.menuItem.update({ where: { id }, data: dto });
     this.realtime.menuChanged(item.branchId, {
       action: 'item_updated',
@@ -163,9 +199,22 @@ export class MenuService {
     );
     const colIndex = (name: string) => header.indexOf(name);
 
+    // Existing items keyed by "name|price" (case-insensitive name) so a re-upload
+    // of the same file — or a row that's already on the menu at the same price —
+    // is skipped as a duplicate. Same name at a different price is NOT a
+    // duplicate (half plate vs full plate), so price is part of the key.
+    const existingItems = await this.prisma.menuItem.findMany({
+      where: { branchId },
+      select: { name: true, price: true },
+    });
+    const dupKey = (name: string, price: number) =>
+      `${name.trim().toLowerCase()}|${Number(price)}`;
+    const seen = new Set(existingItems.map((i) => dupKey(i.name, Number(i.price))));
+
     const categoryCache = new Map<string, string>();
     let created = 0;
     let skipped = 0;
+    let duplicates = 0;
 
     for (let rowNumber = 2; rowNumber <= sheet.rowCount; rowNumber++) {
       const row = sheet.getRow(rowNumber);
@@ -175,6 +224,13 @@ export class MenuService {
 
       if (!name || !categoryName || Number.isNaN(price)) {
         skipped++;
+        continue;
+      }
+
+      // Already on the menu at this exact price (or listed twice in this file).
+      const key = dupKey(name, price);
+      if (seen.has(key)) {
+        duplicates++;
         continue;
       }
 
@@ -208,12 +264,13 @@ export class MenuService {
           type: typeIdx >= 0 ? String(row.getCell(typeIdx).value ?? 'food') || 'food' : 'food',
         },
       });
+      seen.add(key);
       created++;
     }
 
     if (created > 0) {
-      this.realtime.menuChanged(branchId, { action: 'imported', created, skipped });
+      this.realtime.menuChanged(branchId, { action: 'imported', created, skipped, duplicates });
     }
-    return { created, skipped };
+    return { created, skipped, duplicates };
   }
 }
