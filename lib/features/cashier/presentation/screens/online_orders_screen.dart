@@ -836,33 +836,44 @@ class _SettleOnlineSheetState extends ConsumerState<_SettleOnlineSheet> {
           // ── Print a customer copy BEFORE taking payment (not an invoice) ──
           SizedBox(
             width: double.infinity,
-            child: OutlinedButton.icon(
+            child: OutlinedButton(
               onPressed: _busy ? null : _printCustomerCopy,
               style: OutlinedButton.styleFrom(
                   foregroundColor: AppColors.primary,
                   side: const BorderSide(color: AppColors.primary),
                   padding: const EdgeInsets.symmetric(vertical: 13)),
-              icon: const Icon(Icons.print_rounded, size: 18),
-              label: const Text('Print Bill (Customer Copy — not an invoice)'),
+              child: const Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                Icon(Icons.print_rounded, size: 18),
+                SizedBox(width: 8),
+                Flexible(
+                    child: Text('Print Bill — Customer Copy', overflow: TextOverflow.ellipsis)),
+              ]),
             ),
           ),
           const SizedBox(height: 10),
           // ── Settle AFTER payment is received: invoice + payment recorded ──
           SizedBox(
             width: double.infinity,
-            child: ElevatedButton.icon(
+            child: ElevatedButton(
               onPressed: _busy ? null : _settle,
               style: ElevatedButton.styleFrom(
                   backgroundColor: AppColors.success,
                   foregroundColor: Colors.white,
                   padding: const EdgeInsets.symmetric(vertical: 14)),
-              icon: _busy
-                  ? const SizedBox(
+              child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                if (_busy)
+                  const SizedBox(
                       width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                  : const Icon(Icons.check_circle_rounded, size: 18),
-              label: Text(_busy
-                  ? 'Working…'
-                  : 'Settle & Print Invoice (NPR ${_money.format(total)})'),
+                else
+                  const Icon(Icons.check_circle_rounded, size: 18),
+                const SizedBox(width: 8),
+                Flexible(
+                  child: Text(
+                    _busy ? 'Working…' : 'Settle & Print Invoice · NPR ${_money.format(total)}',
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ]),
             ),
           ),
           const SizedBox(height: 6),
