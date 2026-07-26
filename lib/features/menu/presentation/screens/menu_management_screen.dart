@@ -956,8 +956,12 @@ class _MenuManagementScreenState extends ConsumerState<MenuManagementScreen> {
 
     // Bar link — optional. Manager can tie this item to a bottle so selling it
     // deducts pegs. Loaded best-effort; on failure the section just shows empty.
+    // Invalidate first so a bottle just added on the Bar screen shows up here —
+    // this provider caches, and bottles are added through a different provider,
+    // so without this the dropdown keeps showing the old (often empty) list.
     List<Map<String, dynamic>> barStocks = [];
     try {
+      ref.invalidate(menuBarStockProvider);
       barStocks = await ref.read(menuBarStockProvider.future);
     } catch (_) {}
     String? barStockId = existing?.barStockId;
