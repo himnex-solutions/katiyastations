@@ -69,7 +69,9 @@ final menuBarStockProvider =
   if (profile?.branchId == null) return [];
   final response = await ApiClient.instance.get(
     ApiConstants.barStock,
-    queryParameters: {'branchId': profile!.branchId!, 'limit': '300'},
+    // 100 is the backend's max page size (PaginationDto @Max(100)); asking for
+    // more (was 300) fails validation and left this list silently empty.
+    queryParameters: {'branchId': profile!.branchId!, 'limit': '100'},
   );
   final data = response.data as Map<String, dynamic>;
   return List<Map<String, dynamic>>.from(data['data'] as List? ?? []);
