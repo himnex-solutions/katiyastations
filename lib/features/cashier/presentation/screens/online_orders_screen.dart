@@ -695,13 +695,65 @@ class _SettleOnlineSheet extends ConsumerStatefulWidget {
   ConsumerState<_SettleOnlineSheet> createState() => _SettleOnlineSheetState();
 }
 
+// The payment methods the backend accepts (see GenerateBillDto). "online" is
+// NOT one of them — sending it was what triggered the validation error. These
+// mirror the main cashier screen.
+const _onlinePayMethods = <(String, String)>[
+  ('cash', 'Cash'),
+  ('esewa', 'eSewa'),
+  ('khalti', 'Khalti'),
+  ('fonepay', 'FonePay'),
+  ('credit', 'Credit'),
+];
+
 class _SettleOnlineSheetState extends ConsumerState<_SettleOnlineSheet> {
   String _method = 'cash';
   bool _busy = false;
 
+  double get _total => (widget.order['total_amount'] as num?)?.toDouble() ?? 0;
+
+  /// The order's line items, flattened for the bill/receipt payload.
+  Future<List<Map<String, dynamic>>> _fetchItems() async {
+    final itemsRes = await ApiClient.instance
+        .get(ApiConstants.kotsBySession(widget.order['id'] as String));
+    return _flattenItems(itemsRes.data as List);
+  }
+
+  /// PRINT (before payment): a customer copy only. No invoice number is
+  /// generated and nothing is recorded — printBill renders it as
+  /// "BILL (not a tax invoice)". Use it to hand the guest a total to check.
+  Future<void> _printCustomerCopy() async {
+    final messenger = ScaffoldMessenger.of(context);
+    setState(() => _busy = true);
+    try {
+      final items = await _fetchItems();
+      final total = _total > 0
+          ? _total
+          : items.fold(0.0,
+              (s, i) => s + ((i['unit_price'] as num?)?.toDouble() ?? 0) * (i['quantity'] as int));
+      if (mounted) {
+        await printBillNow(context, ref, bill: {
+          'session_number': widget.order['session_number'],
+          'customer_name': widget.order['customer_name'],
+          'sub_total': total,
+          'total_amount': total,
+        }, items: items);
+      }
+    } catch (e) {
+      if (mounted) {
+        messenger.showSnackBar(
+            SnackBar(backgroundColor: AppColors.error, content: Text('Print failed: $e')));
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  /// SETTLE & PRINT (after payment received): generates the real bill +
+  /// invoice number, records the payment, then prints the tax invoice.
   Future<void> _settle() async {
     final messenger = ScaffoldMessenger.of(context);
-    final total = (widget.order['total_amount'] as num?)?.toDouble() ?? 0;
+    final total = _total;
     setState(() => _busy = true);
     try {
       final res = await ApiClient.instance.post(
@@ -715,9 +767,7 @@ class _SettleOnlineSheetState extends ConsumerState<_SettleOnlineSheet> {
       );
       final bill = res.data as Map<String, dynamic>;
       // Print the invoice on the receipt printer (it reads the branch itself).
-      final itemsRes = await ApiClient.instance
-          .get(ApiConstants.kotsBySession(widget.order['id'] as String));
-      final items = _flattenItems(itemsRes.data as List);
+      final items = await _fetchItems();
       if (mounted) {
         await printBillNow(context, ref, bill: bill, items: items);
       }
@@ -756,7 +806,7 @@ class _SettleOnlineSheetState extends ConsumerState<_SettleOnlineSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final total = (widget.order['total_amount'] as num?)?.toDouble() ?? 0;
+    final total = _total;
     return SafeArea(
       child: Padding(
         padding: const EdgeInsets.all(20),
@@ -767,17 +817,37 @@ class _SettleOnlineSheetState extends ConsumerState<_SettleOnlineSheet> {
           Text('${widget.order['customer_name'] ?? ''}  ·  NPR ${_money.format(total)}',
               style: GoogleFonts.outfit(fontSize: 13, color: AppColors.textSecondary)),
           const SizedBox(height: 18),
+          Text('PAYMENT METHOD',
+              style: GoogleFonts.outfit(
+                  fontSize: 11, fontWeight: FontWeight.w700, color: AppColors.textHint, letterSpacing: 0.8)),
+          const SizedBox(height: 8),
           Wrap(
             spacing: 8,
-            children: ['cash', 'card', 'online', 'credit']
+            runSpacing: 8,
+            children: _onlinePayMethods
                 .map((m) => ChoiceChip(
-                      label: Text(m[0].toUpperCase() + m.substring(1)),
-                      selected: _method == m,
-                      onSelected: (_) => setState(() => _method = m),
+                      label: Text(m.$2),
+                      selected: _method == m.$1,
+                      onSelected: _busy ? null : (_) => setState(() => _method = m.$1),
                     ))
                 .toList(),
           ),
-          const SizedBox(height: 20),
+          const SizedBox(height: 22),
+          // ── Print a customer copy BEFORE taking payment (not an invoice) ──
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: _busy ? null : _printCustomerCopy,
+              style: OutlinedButton.styleFrom(
+                  foregroundColor: AppColors.primary,
+                  side: const BorderSide(color: AppColors.primary),
+                  padding: const EdgeInsets.symmetric(vertical: 13)),
+              icon: const Icon(Icons.print_rounded, size: 18),
+              label: const Text('Print Bill (Customer Copy — not an invoice)'),
+            ),
+          ),
+          const SizedBox(height: 10),
+          // ── Settle AFTER payment is received: invoice + payment recorded ──
           SizedBox(
             width: double.infinity,
             child: ElevatedButton.icon(
@@ -790,9 +860,14 @@ class _SettleOnlineSheetState extends ConsumerState<_SettleOnlineSheet> {
                   ? const SizedBox(
                       width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
                   : const Icon(Icons.check_circle_rounded, size: 18),
-              label: Text(_busy ? 'Settling…' : 'Confirm Payment (NPR ${_money.format(total)})'),
+              label: Text(_busy
+                  ? 'Working…'
+                  : 'Settle & Print Invoice (NPR ${_money.format(total)})'),
             ),
           ),
+          const SizedBox(height: 6),
+          Text('“Print Bill” gives the customer a copy only. “Settle” records the payment and generates the tax invoice.',
+              style: GoogleFonts.outfit(fontSize: 11, color: AppColors.textHint)),
         ]),
       ),
     );

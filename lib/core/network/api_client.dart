@@ -228,10 +228,18 @@ class ApiClient {
         String? code;
 
         if (responseData is Map<String, dynamic>) {
-          message = responseData['message'] as String? ??
-              responseData['error'] as String? ??
-              message;
-          code = responseData['code'] as String?;
+          // NestJS validation errors return `message` as a List of strings
+          // (e.g. ["paymentMethod must be one of ..."]), not a String — the
+          // old `as String?` cast threw "type 'List<dynamic>' is not a subtype
+          // of type 'String'" and buried the real, human-readable reason.
+          final raw = responseData['message'] ?? responseData['error'];
+          if (raw is String && raw.isNotEmpty) {
+            message = raw;
+          } else if (raw is List && raw.isNotEmpty) {
+            message = raw.map((e) => e.toString()).join('\n');
+          }
+          final rawCode = responseData['code'];
+          code = rawCode is String ? rawCode : null;
         }
 
         if (statusCode == 401) {
