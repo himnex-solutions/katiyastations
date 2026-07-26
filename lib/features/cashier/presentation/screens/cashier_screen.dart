@@ -15,6 +15,7 @@ import '../../../auth/presentation/providers/auth_provider.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import '../../../tables/presentation/providers/tables_provider.dart';
 import '../../../orders/presentation/providers/order_provider.dart';
+import 'online_orders_screen.dart';
 import '../../../dashboard/presentation/screens/dashboard_screen.dart';
 import '../../../payment_history/presentation/screens/payment_history_screen.dart';
 import '../../../branches/presentation/providers/branch_provider.dart';
@@ -304,6 +305,15 @@ class _CashierScreenState extends ConsumerState<CashierScreen>
         ],
       ),
       actions: [
+        // Call-in / delivery orders — takes the cashier to the Online Orders
+        // workspace (build → send to kitchen/bar → settle).
+        IconButton(
+          tooltip: 'Online Orders',
+          icon: const Icon(Icons.delivery_dining_rounded, color: AppColors.primary),
+          onPressed: () => Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => const OnlineOrdersScreen()),
+          ),
+        ),
         // Live thermal-printer reachability for THIS till. Polled locally —
         // the server has no visibility of a printer plugged in here.
         Padding(

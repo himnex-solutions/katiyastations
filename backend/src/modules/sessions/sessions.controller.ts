@@ -6,6 +6,7 @@ import { MergeSessionDto } from './dto/merge-session.dto';
 import { SplitSessionDto } from './dto/split-session.dto';
 import { FindSessionsDto } from './dto/find-sessions.dto';
 import { ReassignWaiterDto } from './dto/reassign-waiter.dto';
+import { CreateOnlineOrderDto } from './dto/create-online-order.dto';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { CurrentUser, CurrentUserPayload } from '../../common/decorators/current-user.decorator';
 
@@ -17,6 +18,18 @@ export class SessionsController {
   @Get()
   findAll(@CurrentUser() user: CurrentUserPayload, @Query() filter: FindSessionsDto) {
     return this.sessionsService.findAll(user, filter);
+  }
+
+  // Online orders — declared before ':id' so "/sessions/online" isn't captured
+  // as an id.
+  @Get('online')
+  onlineOrders(@CurrentUser() user: CurrentUserPayload, @Query('branchId') branchId?: string) {
+    return this.sessionsService.findOnlineOrders(user, branchId);
+  }
+
+  @Post('online')
+  createOnline(@CurrentUser() user: CurrentUserPayload, @Body() dto: CreateOnlineOrderDto) {
+    return this.sessionsService.createOnlineOrder(user, dto);
   }
 
   @Get(':id')

@@ -162,16 +162,21 @@ export class BillingService {
         data: { status: 'billed', totalAmount, closedAt: new Date() },
       });
 
-      await tx.restaurantTable.update({
-        where: { id: session.tableId },
-        data: { status: 'available', currentSessionId: null, billRequested: false, billRequestedAt: null },
-      });
+      // Online / call-in orders have no table to free.
+      if (session.tableId) {
+        await tx.restaurantTable.update({
+          where: { id: session.tableId },
+          data: { status: 'available', currentSessionId: null, billRequested: false, billRequestedAt: null },
+        });
+      }
 
       return created;
     });
 
     this.realtime.billGenerated(session.branchId, bill);
-    this.realtime.tableStatusChanged(session.branchId, session.tableId, { status: 'available' });
+    if (session.tableId) {
+      this.realtime.tableStatusChanged(session.branchId, session.tableId, { status: 'available' });
+    }
     this.auditLogs.record({
       branchId: session.branchId,
       userId: currentUser.userId,

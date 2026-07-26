@@ -85,31 +85,44 @@ Future<List<int>> buildKotBytes(
   final kotNo = _f(kot, 'kotNumber', 'kot_number');
   final ticketNote = _f(kot, 'notes', 'notes');
   final title = _f(kot, 'title', 'title');
+  final orderType = _f(kot, 'orderType', 'order_type');
+  final customerName = _f(kot, 'customerName', 'customer_name');
+  final customerPhone = _f(kot, 'customerPhone', 'customer_phone');
+  final isOnline = orderType == 'online';
   final createdRaw = kot['createdAt'] ?? kot['created_at'];
   final when = DateTime.tryParse(createdRaw?.toString() ?? '') ?? DateTime.now();
   final items = (kot['items'] as List?) ?? const [];
 
+  const bigStyle = PosStyles(
+    align: PosAlign.center,
+    bold: true,
+    height: PosTextSize.size2,
+    width: PosTextSize.size2,
+  );
+
   // Optional banner (e.g. "BAR") so a station's split ticket is unmistakable.
   if (title.isNotEmpty) {
     for (final line in wrapForPaper('*** $title ***', bigCols)) {
-      b += g.text(line,
-          styles: const PosStyles(
-            align: PosAlign.center,
-            bold: true,
-            height: PosTextSize.size2,
-            width: PosTextSize.size2,
-          ));
+      b += g.text(line, styles: bigStyle);
     }
   }
 
-  for (final line in wrapForPaper(table.isEmpty ? 'TAKEAWAY' : 'TABLE $table', bigCols)) {
-    b += g.text(line,
-        styles: const PosStyles(
-          align: PosAlign.center,
-          bold: true,
-          height: PosTextSize.size2,
-          width: PosTextSize.size2,
-        ));
+  if (isOnline) {
+    // Call-in / delivery order — no table. Headline it clearly and name the
+    // customer so the pass and the cashier know it's a takeaway.
+    for (final line in wrapForPaper('ONLINE ORDER', bigCols)) {
+      b += g.text(line, styles: bigStyle);
+    }
+    if (customerName.isNotEmpty) {
+      b += g.text(customerName, styles: const PosStyles(align: PosAlign.center, bold: true));
+    }
+    if (customerPhone.isNotEmpty) {
+      b += g.text(customerPhone, styles: const PosStyles(align: PosAlign.center));
+    }
+  } else {
+    for (final line in wrapForPaper(table.isEmpty ? 'TAKEAWAY' : 'TABLE $table', bigCols)) {
+      b += g.text(line, styles: bigStyle);
+    }
   }
   if (kotNo.isNotEmpty) {
     b += g.text(kotNo, styles: const PosStyles(align: PosAlign.center, bold: true));

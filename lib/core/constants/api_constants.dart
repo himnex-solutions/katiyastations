@@ -53,6 +53,7 @@ class ApiConstants {
 
   // ── Table Sessions ─────────────────────────────────────────
   static const String sessions = '/sessions';
+  static const String onlineOrders = '/sessions/online';
   static String sessionById(String id) => '/sessions/$id';
   static String openSession(String tableId) => '/tables/$tableId/open';
   static String closeSession(String sessionId) => '/sessions/$sessionId/close';

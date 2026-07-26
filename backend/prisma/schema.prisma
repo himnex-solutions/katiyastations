@@ -162,12 +162,16 @@ model RestaurantTable {
 
 model TableSession {
   id              String    @id @default(uuid())
-  tableId         String    @map("table_id")
+  tableId         String?   @map("table_id") // null for online / call-in orders (no table)
   branchId        String    @map("branch_id")
   sessionNumber   String    @map("session_number")
+  type            String    @default("dine_in") // dine_in | online
   status          String    @default("open") // open | closed | billed
   waiterId        String?   @map("waiter_id")
   customerId      String?   @map("customer_id")
+  customerName    String?   @map("customer_name") // online order: caller's name
+  customerPhone   String?   @map("customer_phone")
+  customerAddress String?   @map("customer_address") // delivery address
   guestCount      Int       @default(1) @map("guest_count")
   totalAmount     Decimal   @default(0.0) @map("total_amount")
   openedAt        DateTime  @default(now()) @map("opened_at")
@@ -179,7 +183,7 @@ model TableSession {
   notes           String?
   createdAt       DateTime  @default(now()) @map("created_at")
 
-  table           RestaurantTable  @relation("TableSessions", fields: [tableId], references: [id], onDelete: Cascade)
+  table           RestaurantTable? @relation("TableSessions", fields: [tableId], references: [id], onDelete: Cascade)
   currentForTable RestaurantTable? @relation("CurrentSession")
   branch          Branch           @relation(fields: [branchId], references: [id], onDelete: Cascade)
   waiter          User?            @relation("SessionWaiter", fields: [waiterId], references: [id], onDelete: SetNull)

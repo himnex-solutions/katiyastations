@@ -9,6 +9,7 @@ import { MergeSessionDto } from './dto/merge-session.dto';
 import { SplitSessionDto } from './dto/split-session.dto';
 import { FindSessionsDto } from './dto/find-sessions.dto';
 import { ReassignWaiterDto } from './dto/reassign-waiter.dto';
+import { CreateOnlineOrderDto } from './dto/create-online-order.dto';
 import { CurrentUserPayload } from '../../common/decorators/current-user.decorator';
 import { resolveBranchScope } from '../../common/utils/branch-scope.util';
 import { generateSequenceNumber } from '../../common/utils/sequence.util';
@@ -46,6 +47,64 @@ export class SessionsService {
     return session;
   }
 
+  /**
+   * Creates a table-less "online" order session for a call-in / delivery
+   * customer. KOTs and the bill hang off it exactly like a dine-in session, so
+   * online sales flow through the same kitchen/bar printing and reports — the
+   * only difference is there is no table and it carries the caller's details.
+   */
+  async createOnlineOrder(currentUser: CurrentUserPayload, dto: CreateOnlineOrderDto) {
+    if (dto.id) {
+      const existing = await this.prisma.tableSession.findUnique({ where: { id: dto.id } });
+      if (existing) return toSessionResponse(existing);
+    }
+    const branchId = dto.branchId ?? currentUser.branchId;
+    if (!branchId) throw new BadRequestException('Branch is required for an online order');
+
+    const session = await this.prisma.tableSession.create({
+      data: {
+        id: dto.id,
+        branchId,
+        tableId: null,
+        type: 'online',
+        sessionNumber: generateSequenceNumber('ONL'),
+        status: 'open',
+        waiterId: currentUser.userId,
+        guestCount: 1,
+        customerName: dto.customerName,
+        customerPhone: dto.customerPhone,
+        customerAddress: dto.customerAddress,
+      },
+    });
+
+    this.realtime.sessionOpened(branchId, session);
+    this.auditLogs.record({
+      branchId,
+      userId: currentUser.userId,
+      action: 'session_opened',
+      tableName: 'table_sessions',
+      rowId: session.id,
+      newValues: { type: 'online', customer: dto.customerName },
+    });
+    return toSessionResponse(session);
+  }
+
+  /** Open (not-yet-settled) online orders for the branch — the cashier's list
+   * to send to the kitchen/bar and settle now or later. */
+  async findOnlineOrders(currentUser: CurrentUserPayload, branchId?: string) {
+    const scoped = resolveBranchScope(currentUser, branchId);
+    const sessions = await this.prisma.tableSession.findMany({
+      where: {
+        ...(scoped ? { branchId: scoped } : {}),
+        type: 'online',
+        status: { not: 'billed' },
+      },
+      include: { waiter: { select: { fullName: true } } },
+      orderBy: { openedAt: 'desc' },
+    });
+    return sessions.map(toSessionResponse);
+  }
+
   async kots(sessionId: string) {
     await this.findOne(sessionId);
     return this.kotsService.bySession(sessionId);
@@ -77,19 +136,25 @@ export class SessionsService {
     // paying the bill, merging into another table — releases the table
     // straight to 'available', and nothing in the app has ever been able to
     // move a table out of 'cleaning' again, so a closed table was stranded.
-    const [updated] = await this.prisma.$transaction([
-      this.prisma.tableSession.update({
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const closed = await tx.tableSession.update({
         where: { id },
         data: { status: 'closed', closedAt: new Date() },
-      }),
-      this.prisma.restaurantTable.update({
-        where: { id: session.tableId },
-        data: { status: 'available', currentSessionId: null, billRequested: false, billRequestedAt: null },
-      }),
-    ]);
+      });
+      // Online / call-in orders have no table to free.
+      if (session.tableId) {
+        await tx.restaurantTable.update({
+          where: { id: session.tableId },
+          data: { status: 'available', currentSessionId: null, billRequested: false, billRequestedAt: null },
+        });
+      }
+      return closed;
+    });
 
     this.realtime.sessionClosed(session.branchId, updated);
-    this.realtime.tableStatusChanged(session.branchId, session.tableId, { status: 'available' });
+    if (session.tableId) {
+      this.realtime.tableStatusChanged(session.branchId, session.tableId, { status: 'available' });
+    }
     this.auditLogs.record({
       branchId: session.branchId,
       userId: currentUser?.userId,
@@ -196,14 +261,15 @@ export class SessionsService {
         data: { status: 'closed', closedAt: new Date() },
       }),
       this.prisma.restaurantTable.update({
-        where: { id: source.tableId },
+        // Merge is a dine-in table operation; the source always has a table.
+        where: { id: source.tableId! },
         data: { status: 'available', currentSessionId: null, billRequested: false, billRequestedAt: null },
       }),
     ]);
 
     await this.recalculateTotal(destination.id);
 
-    this.realtime.tableStatusChanged(source.branchId, source.tableId, { status: 'available' });
+    this.realtime.tableStatusChanged(source.branchId, source.tableId!, { status: 'available' });
     this.realtime.sessionOpened(destination.branchId, await this.findOne(destination.id));
     this.auditLogs.record({
       branchId: source.branchId,

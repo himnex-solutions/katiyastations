@@ -164,12 +164,18 @@ Map<String, dynamic> _kotPayload(
   String? tableNumber,
   List<KotItem> items, {
   String? title,
+  String? orderType,
+  String? customerName,
+  String? customerPhone,
 }) =>
     {
       'kotNumber': kot.kotNumber,
       'tableNumber': tableNumber ?? kot.tableNumber ?? '',
       'createdAt': kot.createdAt.toIso8601String(),
       if (title != null) 'title': title,
+      if (orderType != null) 'orderType': orderType,
+      if (customerName != null) 'customerName': customerName,
+      if (customerPhone != null) 'customerPhone': customerPhone,
       if (kot.notes != null && kot.notes!.isNotEmpty) 'notes': kot.notes,
       'items': [
         for (final i in items)
@@ -181,3 +187,38 @@ Map<String, dynamic> _kotPayload(
           },
       ],
     };
+
+/// Prints an ONLINE (call-in / delivery) order's tickets: food to the kitchen
+/// printer and bar/drink to the cashier's receipt printer, both headed
+/// "ONLINE ORDER" with the customer's name. The cashier drives this, so it
+/// prints to whichever of the two printers this device has configured (it does
+/// not require the auto-print toggles). No-op on web.
+Future<void> printOnlineOrderTickets(
+  WidgetRef ref, {
+  required Kot kot,
+  required String customerName,
+  String? customerPhone,
+}) async {
+  if (!thermalPrinter.supported) return;
+
+  final foodItems = kot.items.where((i) => !i.isBar).toList();
+  final barItems = kot.items.where((i) => i.isBar).toList();
+
+  final kitchenCfg = ref.read(kotPrinterConfigProvider);
+  if (kitchenCfg.configured && foodItems.isNotEmpty) {
+    await thermalPrinter.printKotTicket(
+      config: kitchenCfg,
+      kot: _kotPayload(kot, '', foodItems,
+          orderType: 'online', customerName: customerName, customerPhone: customerPhone),
+    );
+  }
+
+  final barCfg = ref.read(receiptPrinterConfigProvider);
+  if (barCfg.configured && barItems.isNotEmpty) {
+    await thermalPrinter.printKotTicket(
+      config: barCfg,
+      kot: _kotPayload(kot, '', barItems,
+          title: 'BAR', orderType: 'online', customerName: customerName, customerPhone: customerPhone),
+    );
+  }
+}

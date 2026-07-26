@@ -302,7 +302,8 @@ export class ReportsService {
 
     const byTable = new Map<string, { tableNumber: string; sessionCount: number; totalMinutes: number }>();
     for (const session of sessions) {
-      if (!session.closedAt) continue;
+      // Skip table-less online orders — this is a per-table utilisation report.
+      if (!session.closedAt || !session.tableId || !session.table) continue;
       const minutes = (session.closedAt.getTime() - session.openedAt.getTime()) / 60000;
       const entry = byTable.get(session.tableId) ?? {
         tableNumber: session.table.tableNumber,
