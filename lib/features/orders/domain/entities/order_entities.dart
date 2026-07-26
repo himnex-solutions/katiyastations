@@ -4,7 +4,7 @@ class Kot extends Equatable {
   final String id;
   final String branchId;
   final String sessionId;
-  final String tableId;
+  final String? tableId; // null for online / call-in orders (no table)
   final String? tableNumber;
   final String kotNumber;
   final String status; // pending | preparing | ready | served | cancelled
@@ -21,7 +21,7 @@ class Kot extends Equatable {
     required this.id,
     required this.branchId,
     required this.sessionId,
-    required this.tableId,
+    this.tableId,
     this.tableNumber,
     required this.kotNumber,
     required this.status,
@@ -41,7 +41,7 @@ class Kot extends Equatable {
       id: json['id'] as String,
       branchId: json['branch_id'] as String,
       sessionId: json['session_id'] as String,
-      tableId: json['table_id'] as String,
+      tableId: json['table_id'] as String?,
       tableNumber: json['table_number'] as String?,
       kotNumber: json['kot_number'] as String,
       status: json['status'] as String? ?? 'pending',

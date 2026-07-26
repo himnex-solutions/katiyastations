@@ -192,6 +192,12 @@ class _CashierScreenState extends ConsumerState<CashierScreen>
     }
   }
 
+  void _openOnlineOrders() {
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const OnlineOrdersScreen()),
+    );
+  }
+
   @override
   void dispose() {
     _amountCtrl.dispose();
@@ -306,13 +312,34 @@ class _CashierScreenState extends ConsumerState<CashierScreen>
       ),
       actions: [
         // Call-in / delivery orders — takes the cashier to the Online Orders
-        // workspace (build → send to kitchen/bar → settle).
-        IconButton(
-          tooltip: 'Online Orders',
-          icon: const Icon(Icons.delivery_dining_rounded, color: AppColors.primary),
-          onPressed: () => Navigator.of(context).push(
-            MaterialPageRoute(builder: (_) => const OnlineOrdersScreen()),
-          ),
+        // workspace (build → send to kitchen/bar → settle). A labelled button,
+        // not a bare icon, so it reads as a distinct section of the till.
+        Padding(
+          padding: const EdgeInsets.only(right: 8),
+          child: context.isMobile
+              ? IconButton(
+                  tooltip: 'Online Orders',
+                  icon: const Icon(Icons.delivery_dining_rounded,
+                      color: AppColors.primary),
+                  onPressed: _openOnlineOrders,
+                )
+              : ElevatedButton.icon(
+                  icon: const Icon(Icons.delivery_dining_rounded,
+                      size: 18, color: Colors.white),
+                  label: Text('Online Orders',
+                      style: GoogleFonts.outfit(
+                          fontSize: 13, fontWeight: FontWeight.w700)),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.primary,
+                    foregroundColor: Colors.white,
+                    elevation: 0,
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 16, vertical: 12),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10)),
+                  ),
+                  onPressed: _openOnlineOrders,
+                ),
         ),
         // Live thermal-printer reachability for THIS till. Polled locally —
         // the server has no visibility of a printer plugged in here.

@@ -128,7 +128,7 @@ class RestaurantTable extends Equatable {
 // ─── TableSession Entity ───────────────────────────────────────────────────
 class TableSession extends Equatable {
   final String id;
-  final String tableId;
+  final String? tableId; // null for online / call-in orders (no table)
   final String branchId;
   final String sessionNumber;
   final String status;
@@ -147,7 +147,7 @@ class TableSession extends Equatable {
 
   const TableSession({
     required this.id,
-    required this.tableId,
+    this.tableId,
     required this.branchId,
     required this.sessionNumber,
     required this.status,
@@ -168,7 +168,7 @@ class TableSession extends Equatable {
   factory TableSession.fromJson(Map<String, dynamic> json) {
     return TableSession(
       id: json['id'] as String,
-      tableId: json['table_id'] as String,
+      tableId: json['table_id'] as String?,
       branchId: json['branch_id'] as String,
       sessionNumber: json['session_number'] as String,
       status: json['status'] as String? ?? SessionStatus.open,

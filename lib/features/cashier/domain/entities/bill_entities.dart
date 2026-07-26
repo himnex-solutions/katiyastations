@@ -4,7 +4,7 @@ class Bill extends Equatable {
   final String id;
   final String branchId;
   final String sessionId;
-  final String tableId;
+  final String? tableId; // null for online / call-in orders (no table)
   final String invoiceNumber;
   final String? cashierId;
   final String? cashierName;
@@ -26,7 +26,7 @@ class Bill extends Equatable {
     required this.id,
     required this.branchId,
     required this.sessionId,
-    required this.tableId,
+    this.tableId,
     required this.invoiceNumber,
     this.cashierId,
     this.cashierName,
@@ -50,7 +50,7 @@ class Bill extends Equatable {
       id: json['id'] as String,
       branchId: json['branch_id'] as String,
       sessionId: json['session_id'] as String,
-      tableId: json['table_id'] as String,
+      tableId: json['table_id'] as String?,
       invoiceNumber: json['invoice_number'] as String,
       cashierId: json['cashier_id'] as String?,
       cashierName: json['cashier_name'] as String?,
