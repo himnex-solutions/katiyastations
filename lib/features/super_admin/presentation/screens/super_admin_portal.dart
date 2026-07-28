@@ -252,6 +252,11 @@ class _SuperAdminPortalState extends ConsumerState<SuperAdminPortal>
   }
 
   void _showCreateUserDialog(BuildContext context) {
+    // Refetch branches so a branch added since this screen first loaded shows
+    // up in the dropdown — the provider caches, so without this the list would
+    // stay stale until an app restart.
+    ref.invalidate(allBranchesProvider);
+
     final nameCtrl = TextEditingController();
     final emailCtrl = TextEditingController();
     final passCtrl = TextEditingController();
@@ -398,6 +403,9 @@ class _SuperAdminPortalState extends ConsumerState<SuperAdminPortal>
   }
 
   void _showEditUserDialog(BuildContext context, Map<String, dynamic> user) {
+    // Keep the branch dropdown current (see _showCreateUserDialog).
+    ref.invalidate(allBranchesProvider);
+
     final nameCtrl = TextEditingController(text: user['full_name'] as String? ?? '');
     String selectedRole = user['role'] as String? ?? 'cashier';
     String? selectedBranchId = user['branch_id'] as String?;
