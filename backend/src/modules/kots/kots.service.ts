@@ -180,7 +180,15 @@ export class KotsService {
         action: 'item_cancelled',
         tableName: 'kots',
         rowId: id,
+        // Keep the KOT number + table + reason together so a cancelled order
+        // stays fully trackable in the audit log even though it's dropped from
+        // the bill. tableNumber comes off the included relation (see findOne).
         oldValues: { kotNumber: kot.kotNumber, previousStatus: kot.status },
+        newValues: {
+          status: 'cancelled',
+          tableNumber: (kot as any).table?.tableNumber ?? null,
+          reason: dto.reason ?? null,
+        },
       });
     }
 

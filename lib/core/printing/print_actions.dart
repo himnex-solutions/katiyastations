@@ -188,6 +188,75 @@ Map<String, dynamic> _kotPayload(
       ],
     };
 
+/// Prints an ORDER CANCELLED slip for [kot] to the station(s) that made it —
+/// food to the kitchen printer, bar/drink to the cashier's receipt printer —
+/// so staff physically know to stop, carrying the SAME table number and KOT
+/// number for tracking, plus the cancellation [reason].
+///
+/// Cashier-driven (like [printOnlineOrderTickets]): it prints to whichever of
+/// the two printers this device has configured and does NOT depend on the
+/// auto-print toggles. No-op on web / when neither printer is set up. Never
+/// throws — a cancel must succeed even if the slip can't print; failures are
+/// swallowed so the caller's success path (the void itself) is unaffected.
+///
+/// [items] are the order's line maps as held on the cashier screen
+/// (`name`/`quantity`/`note`/`type`) — pass the pre-cancel list so the lines
+/// still render (the ticket builder skips items already marked cancelled).
+Future<void> printCancellationTickets(
+  WidgetRef ref, {
+  required String kotNumber,
+  required String tableNumber,
+  required String reason,
+  required List<Map<String, dynamic>> items,
+  String? cancelledBy,
+}) async {
+  if (!thermalPrinter.supported) return;
+
+  bool isBar(Map<String, dynamic> i) {
+    final t = (i['type'] as String?) ?? 'food';
+    return t == 'bar' || t == 'drink';
+  }
+
+  Map<String, dynamic> slip(List<Map<String, dynamic>> lines, {String? title}) => {
+        'kotNumber': kotNumber,
+        'tableNumber': tableNumber,
+        'createdAt': DateTime.now().toIso8601String(),
+        'title': title == null ? 'ORDER CANCELLED' : 'CANCELLED - $title',
+        // Reason + who voided it ride on the ticket's NOTE line.
+        'notes': [
+          'Reason: $reason',
+          if (cancelledBy != null && cancelledBy.isNotEmpty) 'Voided by: $cancelledBy',
+        ].join('  |  '),
+        // Strip any per-item status so the builder doesn't skip a line that was
+        // just flipped to 'cancelled' — we WANT to show what got voided.
+        'items': [
+          for (final i in lines)
+            {
+              'name': i['name'] ?? i['menu_item_name'],
+              'quantity': i['quantity'],
+              if ((i['note'] ?? i['notes']) != null) 'note': i['note'] ?? i['notes'],
+            },
+        ],
+      };
+
+  final foodItems = items.where((i) => !isBar(i)).toList();
+  final barItems = items.where(isBar).toList();
+
+  final kitchenCfg = ref.read(kotPrinterConfigProvider);
+  if (kitchenCfg.configured && foodItems.isNotEmpty) {
+    try {
+      await thermalPrinter.printKotTicket(config: kitchenCfg, kot: slip(foodItems));
+    } catch (_) {/* a cancel must not fail because the printer is offline */}
+  }
+
+  final barCfg = ref.read(receiptPrinterConfigProvider);
+  if (barCfg.configured && barItems.isNotEmpty) {
+    try {
+      await thermalPrinter.printKotTicket(config: barCfg, kot: slip(barItems, title: 'BAR'));
+    } catch (_) {/* swallow — see above */}
+  }
+}
+
 /// Prints an ONLINE (call-in / delivery) order's tickets: food to the kitchen
 /// printer and bar/drink to the cashier's receipt printer, both headed
 /// "ONLINE ORDER" with the customer's name. The cashier drives this, so it

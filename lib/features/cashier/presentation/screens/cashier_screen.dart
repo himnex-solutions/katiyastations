@@ -1,12 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'dart:convert';
 import 'package:intl/intl.dart';
 import '../../../../core/constants/app_colors.dart';
 import '../../../../core/constants/app_constants.dart';
 import '../../../../core/constants/api_constants.dart';
 import '../../../../core/network/api_client.dart';
 import '../../../../core/offline/connectivity_provider.dart';
+import '../../../../core/offline/offline_store.dart';
+import '../../../../core/offline/sync_engine.dart';
 import '../../../../core/printing/print_actions.dart';
 import '../../../../core/printing/printer_status_pill.dart';
 import '../../../../core/utils/date_time_utils.dart';
@@ -15,6 +18,7 @@ import '../../../auth/presentation/providers/auth_provider.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import '../../../tables/presentation/providers/tables_provider.dart';
 import '../../../orders/presentation/providers/order_provider.dart';
+import '../../../orders/domain/entities/order_entities.dart';
 import 'online_orders_screen.dart';
 import '../../../dashboard/presentation/screens/dashboard_screen.dart';
 import '../../../payment_history/presentation/screens/payment_history_screen.dart';
@@ -962,6 +966,7 @@ class _CashierScreenState extends ConsumerState<CashierScreen>
             _buildSessionContextBar(data),
             const SizedBox(height: 14),
             _buildOrderCard(items, subtotal),
+            _buildSentOrdersCard(data, profile),
             const SizedBox(height: 14),
             _buildPaymentPanel(subtotal, serviceCharge, vat, total, amountPaid,
                 change, items, data, profile,
@@ -988,6 +993,8 @@ class _CashierScreenState extends ConsumerState<CashierScreen>
                 const SizedBox(height: 16),
                 // ── Invoice-style order card ────────────────────────
                 _buildOrderCard(items, subtotal),
+                // ── Sent orders (per-KOT cancel) ────────────────────
+                _buildSentOrdersCard(data, profile),
               ],
             ),
           ),
@@ -2457,6 +2464,363 @@ class _CashierScreenState extends ConsumerState<CashierScreen>
   // ─────────────────────────────────────────────────────────
   //  SETTLE BILL
   // ─────────────────────────────────────────────────────────
+  // ─────────────────────────────────────────────────────────
+  //  SENT ORDERS — every KOT already fired to the kitchen/bar,
+  //  each cancellable by a cashier/manager. A cancelled order
+  //  drops out of the bill (server excludes it) and a CANCELLED
+  //  slip is printed to the station so staff stop making it.
+  // ─────────────────────────────────────────────────────────
+  bool get _canCancelOrders {
+    final p = ref.read(authNotifierProvider).value;
+    return p != null && (p.isCashier || p.isBranchManager || p.isSuperAdmin);
+  }
+
+  Widget _buildSentOrdersCard(Map<String, dynamic> data, dynamic profile) {
+    if (!_canCancelOrders) return const SizedBox.shrink();
+    final kots = (data['kots'] as List?)?.cast<KotWithItems>() ?? [];
+    if (kots.isEmpty) return const SizedBox.shrink();
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 16),
+      child: Container(
+        clipBehavior: Clip.antiAlias,
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(_CashierUi.cardRadius),
+          border: Border.all(color: AppColors.border),
+          boxShadow: _CashierUi.cardShadow,
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 18, 20, 12),
+              child: _sectionLabel(
+                'SENT ORDERS',
+                trailing: Text(
+                  'Cancel voids it & alerts the station',
+                  style: GoogleFonts.outfit(
+                      fontSize: 10.5, color: AppColors.textHint),
+                ),
+              ),
+            ),
+            Container(height: 1, color: AppColors.divider),
+            ...kots.map(_sentOrderRow),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _sentOrderRow(KotWithItems kot) {
+    final liveItems =
+        kot.items.where((i) => i['status'] != 'cancelled').toList();
+    final itemCount = liveItems.fold<int>(
+        0, (sum, i) => sum + ((i['quantity'] as num?)?.toInt() ?? 0));
+    final names = liveItems
+        .map((i) => (i['menu_item_name'] ?? i['name'] ?? 'Item') as String)
+        .join(', ');
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: AppColors.primary.withValues(alpha: 0.08),
+              borderRadius: BorderRadius.circular(9),
+            ),
+            child: const Icon(Icons.receipt_long_rounded,
+                size: 16, color: AppColors.primary),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Text(
+                      kot.kotNumber,
+                      style: GoogleFonts.outfit(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.textPrimary),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      '$itemCount item${itemCount == 1 ? '' : 's'}',
+                      style: GoogleFonts.outfit(
+                          fontSize: 11, color: AppColors.textHint),
+                    ),
+                  ],
+                ),
+                if (names.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 2),
+                    child: Text(
+                      names,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: GoogleFonts.outfit(
+                          fontSize: 11.5, color: AppColors.textSecondary),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 10),
+          OutlinedButton.icon(
+            icon: const Icon(Icons.cancel_outlined, size: 15),
+            label: const Text('Cancel'),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: AppColors.error,
+              side: BorderSide(color: AppColors.error.withValues(alpha: 0.4)),
+              textStyle:
+                  GoogleFonts.outfit(fontSize: 12, fontWeight: FontWeight.w600),
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8)),
+            ),
+            onPressed: _processing ? null : () => _cancelOrder(kot),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _snack(String message, Color color, IconData icon) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      backgroundColor: color,
+      behavior: SnackBarBehavior.floating,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      margin: const EdgeInsets.all(16),
+      content: Row(children: [
+        Icon(icon, color: Colors.white, size: 18),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Text(message,
+              style: GoogleFonts.outfit(
+                  color: Colors.white, fontWeight: FontWeight.w600)),
+        ),
+      ]),
+    ));
+  }
+
+  /// Cancels a whole KOT that's already been fired. Offline-first:
+  ///  • An order taken offline that hasn't synced yet is voided purely locally
+  ///    — its queued "create" is dropped from the outbox so it never reaches
+  ///    the server. Instant, no network.
+  ///  • An order already on the server is cancelled through the API when online
+  ///    (restocks + drops it from the bill), or queued to replay when offline.
+  /// Either way the kitchen/bar gets a printed CANCELLED slip (LAN/USB — works
+  /// with no internet).
+  Future<void> _cancelOrder(KotWithItems kot) async {
+    final reason = await _showCancelReasonDialog(kot);
+    if (reason == null || reason.trim().isEmpty) return;
+    final trimmed = reason.trim();
+
+    setState(() => _processing = true);
+    try {
+      final voidedLocally = await _voidUnsyncedOfflineKot(kot.id);
+      if (!voidedLocally) {
+        if (ref.read(connectivityProvider)) {
+          await ApiClient.instance.patch(
+            ApiConstants.updateKotStatus(kot.id),
+            data: {'status': 'cancelled', 'reason': trimmed},
+          );
+        } else {
+          // Server-side order, but we're offline — queue the cancel to replay
+          // when the connection is back (the sync engine drains the outbox).
+          await OfflineStore.instance.enqueue(
+            entityType: 'kot_cancel',
+            operation: 'cancel',
+            endpoint: ApiConstants.updateKotStatus(kot.id),
+            method: 'PATCH',
+            payload: {'status': 'cancelled', 'reason': trimmed},
+          );
+        }
+      }
+
+      // Fire the CANCELLED slip(s) to the station(s) — pass the pre-cancel item
+      // list (statuses stripped inside) so the voided lines still print. This
+      // never throws, so a printer being offline can't undo the void.
+      final profile = ref.read(authNotifierProvider).value;
+      final table = ref
+          .read(tablesStreamProvider)
+          .value
+          ?.where((t) => t.id == _selectedTableId)
+          .firstOrNull;
+      final liveItems = kot.items
+          .where((i) => i['status'] != 'cancelled')
+          .map((i) => Map<String, dynamic>.from(i))
+          .toList();
+      await printCancellationTickets(
+        ref,
+        kotNumber: kot.kotNumber,
+        tableNumber: table?.tableNumber ?? '',
+        reason: trimmed,
+        items: liveItems,
+        cancelledBy: profile?.fullName,
+      );
+
+      // Refresh everywhere the voided order was counted.
+      ref.invalidate(sessionKotsProvider(_selectedSessionId!));
+      ref.invalidate(sessionBillingProvider(_selectedSessionId!));
+      ref.invalidate(tablesStreamProvider);
+      if (_selectedTableId != null) {
+        ref.invalidate(tableSessionProvider(_selectedTableId!));
+      }
+      ref.invalidate(dashboardKotsProvider);
+      await ref.read(pendingSyncProvider.notifier).refresh();
+
+      _snack('Order ${kot.kotNumber} cancelled', AppColors.success,
+          Icons.check_circle_rounded);
+    } catch (e) {
+      _snack('Failed to cancel order: $e', AppColors.error,
+          Icons.error_outline_rounded);
+    } finally {
+      if (mounted) setState(() => _processing = false);
+    }
+  }
+
+  /// Voids an order that was taken offline and hasn't synced yet: removes its
+  /// queued "create" from the outbox (so it never reaches the server) and drops
+  /// the local copy. Returns true if it was such an order, false if it's a
+  /// server-side KOT that must be cancelled through the API / outbox instead.
+  Future<bool> _voidUnsyncedOfflineKot(String kotId) async {
+    final ops = await OfflineStore.instance.pendingOps();
+    for (final op in ops) {
+      if (op.entityType != 'kot' || op.operation != 'create' || op.id == null) {
+        continue;
+      }
+      try {
+        final data = jsonDecode(op.payload) as Map<String, dynamic>;
+        if (data['id'] == kotId) {
+          await OfflineStore.instance.deleteOp(op.id!);
+          await OfflineStore.instance.deleteOfflineKot(kotId);
+          return true;
+        }
+      } catch (_) {/* skip a malformed queued op */}
+    }
+    return false;
+  }
+
+  /// Reason picker for a cancellation — a preset must be chosen (or a custom one
+  /// typed). Returns the reason, or null if the cashier backed out. Required by
+  /// design so a void is always accountable in the audit log + on the slip.
+  Future<String?> _showCancelReasonDialog(KotWithItems kot) {
+    const presets = [
+      'Wrong order entered',
+      'Guest changed mind',
+      'Item unavailable',
+      'Duplicate order',
+      'Kitchen delay',
+    ];
+    String? selected;
+    final customCtrl = TextEditingController();
+
+    return showDialog<String>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setS) {
+          final effective =
+              customCtrl.text.trim().isNotEmpty ? customCtrl.text.trim() : selected;
+          return AlertDialog(
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            title: Row(children: [
+              const Icon(Icons.cancel_outlined, color: AppColors.error),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text('Cancel ${kot.kotNumber}?',
+                    style: GoogleFonts.outfit(fontWeight: FontWeight.w700)),
+              ),
+            ]),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'This voids the order for this table. It won\'t appear on the '
+                    'bill, and a CANCELLED slip is sent to the station.',
+                    style: GoogleFonts.outfit(
+                        fontSize: 12.5, color: AppColors.textSecondary),
+                  ),
+                  const SizedBox(height: 16),
+                  Text('Reason (required)',
+                      style: GoogleFonts.outfit(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.textHint,
+                          letterSpacing: 0.5)),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: presets.map((r) {
+                      final isSel =
+                          selected == r && customCtrl.text.trim().isEmpty;
+                      return ChoiceChip(
+                        label: Text(r),
+                        selected: isSel,
+                        labelStyle: GoogleFonts.outfit(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: isSel ? Colors.white : AppColors.textSecondary,
+                        ),
+                        selectedColor: AppColors.error,
+                        backgroundColor: _CashierUi.subtleFill,
+                        onSelected: (_) => setS(() {
+                          selected = r;
+                          customCtrl.clear();
+                        }),
+                      );
+                    }).toList(),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: customCtrl,
+                    onChanged: (_) => setS(() {}),
+                    style: GoogleFonts.outfit(fontSize: 13),
+                    decoration: InputDecoration(
+                      isDense: true,
+                      hintText: 'Or type a custom reason…',
+                      hintStyle: GoogleFonts.outfit(
+                          fontSize: 12.5, color: AppColors.textHint),
+                      border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8)),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Keep Order'),
+              ),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.error,
+                  foregroundColor: Colors.white,
+                ),
+                onPressed: (effective == null || effective.isEmpty)
+                    ? null
+                    : () => Navigator.pop(ctx, effective),
+                child: const Text('Cancel Order'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
   Future<void> _settleBill(
       double total,
       double subtotal,
