@@ -24,11 +24,25 @@ final barStockProvider = FutureProvider<List<BarStockItem>>((ref) async {
     ..sort((a, b) => a.name.compareTo(b.name));
 });
 
-class BarScreen extends ConsumerWidget {
+class BarScreen extends ConsumerStatefulWidget {
   const BarScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<BarScreen> createState() => _BarScreenState();
+}
+
+class _BarScreenState extends ConsumerState<BarScreen> {
+  final _searchCtrl = TextEditingController();
+  String _query = '';
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final stockAsync = ref.watch(barStockProvider);
 
     return Scaffold(
@@ -71,14 +85,34 @@ class BarScreen extends ConsumerWidget {
       body: stockAsync.when(
         loading: () => const Center(child: CircularProgressIndicator(color: AppColors.primary)),
         error: (e, _) => Center(child: Text('Error: $e')),
-        data: (items) {
-          final categories = {'spirits', 'beer', 'wine', 'other'};
+        data: (allItems) {
+          // Filter by the search query (name or category).
+          final q = _query.toLowerCase();
+          final items = q.isEmpty
+              ? allItems
+              : allItems
+                  .where((i) =>
+                      i.name.toLowerCase().contains(q) ||
+                      i.category.toLowerCase().contains(q))
+                  .toList();
+
+          // Group by the categories that ACTUALLY exist in the data (falling
+          // back to "other" for a blank one) — a fixed spirits/beer/wine/other
+          // set silently hid any item with a different or differently-cased
+          // category, so it never showed even though the count included it.
+          final grouped = <String, List<BarStockItem>>{};
+          for (final i in items) {
+            final key = i.category.trim().isEmpty ? 'other' : i.category.trim();
+            grouped.putIfAbsent(key, () => []).add(i);
+          }
+          final categories = grouped.keys.toList()..sort();
+
           return ResponsiveContent(child: SingleChildScrollView(
             padding: const EdgeInsets.all(16),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Summary
+                // Summary (always reflects the full inventory, not the filter).
                 Container(
                   padding: const EdgeInsets.all(16),
                   decoration: BoxDecoration(
@@ -90,21 +124,57 @@ class BarScreen extends ConsumerWidget {
                     const SizedBox(width: 16),
                     Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                       Text('Bar Inventory', style: GoogleFonts.outfit(fontSize: 16, fontWeight: FontWeight.w700, color: AppColors.onPrimary)),
-                      Text('${items.length} items tracked', style: GoogleFonts.outfit(fontSize: 13, color: Colors.white.withValues(alpha: 0.75))),
+                      Text('${allItems.length} items tracked', style: GoogleFonts.outfit(fontSize: 13, color: Colors.white.withValues(alpha: 0.75))),
                     ]),
                     const Spacer(),
                     Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
                       Text('Total Bottles', style: GoogleFonts.outfit(fontSize: 12, color: Colors.white.withValues(alpha: 0.75))),
-                      Text(items.fold<double>(0, (s, i) => s + i.currentBottles).toStringAsFixed(1),
+                      Text(allItems.fold<double>(0, (s, i) => s + i.currentBottles).toStringAsFixed(1),
                           style: GoogleFonts.outfit(fontSize: 22, fontWeight: FontWeight.w700, color: AppColors.onPrimary)),
                     ]),
                   ]),
                 ),
-                const SizedBox(height: 20),
+                const SizedBox(height: 16),
+                // Search
+                TextField(
+                  controller: _searchCtrl,
+                  onChanged: (v) => setState(() => _query = v.trim()),
+                  decoration: InputDecoration(
+                    isDense: true,
+                    hintText: 'Search stock by name or category…',
+                    prefixIcon: const Icon(Icons.search_rounded, size: 20),
+                    suffixIcon: _query.isEmpty
+                        ? null
+                        : IconButton(
+                            icon: const Icon(Icons.close_rounded, size: 18),
+                            onPressed: () => setState(() {
+                              _searchCtrl.clear();
+                              _query = '';
+                            }),
+                          ),
+                    filled: true,
+                    fillColor: AppColors.surface,
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                if (items.isEmpty)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 40),
+                    child: Center(
+                      child: Column(children: [
+                        const Icon(Icons.search_off_rounded, size: 42, color: AppColors.textHint),
+                        const SizedBox(height: 10),
+                        Text(
+                          _query.isEmpty ? 'No bar stock yet.' : 'No stock matches “$_query”.',
+                          style: GoogleFonts.outfit(color: AppColors.textHint),
+                        ),
+                      ]),
+                    ),
+                  ),
                 // By category
                 ...categories.map((cat) {
-                  final catItems = items.where((i) => i.category == cat).toList();
-                  if (catItems.isEmpty) return const SizedBox();
+                  final catItems = grouped[cat]!;
                   return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                     Padding(
                       padding: const EdgeInsets.only(bottom: 10),
