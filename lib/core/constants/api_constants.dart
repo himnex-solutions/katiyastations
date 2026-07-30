@@ -204,8 +204,12 @@ class ApiConstants {
   // TCP connect fails fast, and 15s here used to freeze every send/screen for
   // that long before giving up.
   static const Duration connectTimeout = Duration(seconds: 5);
-  static const Duration receiveTimeout = Duration(seconds: 30);
-  static const Duration sendTimeout = Duration(seconds: 30);
+  // receive/send kept modest too: a healthy response to any of these small
+  // JSON endpoints arrives in well under a second, so a call still dragging on
+  // at 12s means the connection is bad — fail then and fall back to cache
+  // rather than freezing the screen for 30s waiting on a server that's silent.
+  static const Duration receiveTimeout = Duration(seconds: 12);
+  static const Duration sendTimeout = Duration(seconds: 12);
 
   // ── Pagination Defaults ────────────────────────────────────
   static const int defaultPageSize = 20;

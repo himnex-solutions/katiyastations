@@ -102,6 +102,7 @@ class _BarScreenState extends ConsumerState<BarScreen> {
         ],
       ),
       body: stockAsync.when(
+        skipLoadingOnReload: true,
         loading: () => const Center(child: CircularProgressIndicator(color: AppColors.primary)),
         error: (e, _) => Center(child: Text('Error: $e')),
         data: (allItems) {

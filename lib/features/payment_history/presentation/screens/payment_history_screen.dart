@@ -37,26 +37,59 @@ final billsStreamProvider =
         range.end.add(const Duration(days: 1)).toUtc().toIso8601String();
   }
 
-  // Walk every page until one comes back SHORT of a full 100 rows — that's the
-  // definitive "last page" signal and, crucially, does NOT depend on the
-  // server's meta/totalPages. The earlier version trusted meta.totalPages; if
-  // the response lacked a proper meta it read as 1 and the loop stopped after
-  // the first 100 — which is exactly why revenue/search never saw past 100.
-  // The 100-page ceiling (~10k bills) is only a runaway guard.
   const pageSize = 100;
-  final all = <Bill>[];
-  var page = 1;
-  const maxPages = 100;
-  while (page <= maxPages) {
+  const maxPages = 100; // runaway guard (~10k bills)
+
+  Future<List<Map<String, dynamic>>> fetchPage(int page) async {
     final response = await ApiClient.instance.get(
       ApiConstants.paymentHistory,
       queryParameters: {...baseQuery, 'page': '$page'},
     );
     final data = response.data as Map<String, dynamic>;
-    final rows = List<Map<String, dynamic>>.from(data['data'] as List? ?? []);
-    all.addAll(rows.map((r) => Bill.fromJson(r)));
-    if (rows.length < pageSize) break; // last page reached
-    page++;
+    return List<Map<String, dynamic>>.from(data['data'] as List? ?? []);
+  }
+
+  // Page 1 first — its meta tells us the total so the remaining pages can be
+  // fetched CONCURRENTLY instead of one-after-another. Sequential paging was the
+  // slow part: N bills meant N blocking round-trips before the screen could
+  // render. Now it's one round-trip plus parallel batches.
+  final firstResp = await ApiClient.instance.get(
+    ApiConstants.paymentHistory,
+    queryParameters: {...baseQuery, 'page': '1'},
+  );
+  final firstData = firstResp.data as Map<String, dynamic>;
+  final firstRows = List<Map<String, dynamic>>.from(firstData['data'] as List? ?? []);
+  final all = <Bill>[...firstRows.map((r) => Bill.fromJson(r))];
+
+  if (firstRows.length >= pageSize) {
+    final meta = firstData['meta'] as Map<String, dynamic>?;
+    final total = (meta?['total'] as num?)?.toInt();
+    final lastPage = (total != null && total > 0)
+        ? ((total + pageSize - 1) ~/ pageSize).clamp(1, maxPages)
+        : maxPages;
+
+    if (total != null && total > 0) {
+      // Known page count → fetch pages 2..last in parallel, capped at 8 at a
+      // time so we never open a flood of sockets at once.
+      for (var start = 2; start <= lastPage; start += 8) {
+        final batch = <Future<List<Map<String, dynamic>>>>[];
+        for (var p = start; p < start + 8 && p <= lastPage; p++) {
+          batch.add(fetchPage(p));
+        }
+        for (final rows in await Future.wait(batch)) {
+          all.addAll(rows.map((r) => Bill.fromJson(r)));
+        }
+      }
+    } else {
+      // No usable total → walk sequentially until a short page (robust fallback).
+      var page = 2;
+      while (page <= maxPages) {
+        final rows = await fetchPage(page);
+        all.addAll(rows.map((r) => Bill.fromJson(r)));
+        if (rows.length < pageSize) break;
+        page++;
+      }
+    }
   }
   return all;
 });
@@ -150,6 +183,7 @@ class _PaymentHistoryScreenState extends ConsumerState<PaymentHistoryScreen> {
           ),
           const Divider(height: 1),
           billsAsync.when(
+            skipLoadingOnReload: true,
             loading: () => const SizedBox(height: 80, child: LinearProgressIndicator()),
             error: (_, __) => const SizedBox(),
             data: (bills) {
@@ -182,6 +216,7 @@ class _PaymentHistoryScreenState extends ConsumerState<PaymentHistoryScreen> {
           const Divider(height: 1),
           Expanded(
             child: billsAsync.when(
+              skipLoadingOnReload: true,
               loading: () => const Center(child: CircularProgressIndicator(color: AppColors.primary)),
               error: (e, _) => Center(child: Text('Error: $e', style: const TextStyle(color: AppColors.error))),
               data: (bills) {

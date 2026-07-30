@@ -334,6 +334,7 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
           const Divider(height: 1),
           Expanded(
             child: itemsAsync.when(
+              skipLoadingOnReload: true,
               loading: () => Skeletonizer(
                 enabled: true,
                 effect: const ShimmerEffect(

@@ -248,6 +248,7 @@ class _OnlineOrdersScreenState extends ConsumerState<OnlineOrdersScreen> {
         ],
         _sectionLabel('Sent — awaiting payment'),
         ordersAsync.when(
+          skipLoadingOnReload: true,
           loading: () => const Padding(
               padding: EdgeInsets.all(24),
               child: Center(child: CircularProgressIndicator(color: AppColors.primary))),
@@ -279,6 +280,7 @@ class _OnlineOrdersScreenState extends ConsumerState<OnlineOrdersScreen> {
     AsyncValue<List<Map<String, dynamic>>> historyAsync,
   ) {
     return historyAsync.when(
+      skipLoadingOnReload: true,
       loading: () => const Center(child: CircularProgressIndicator(color: AppColors.primary)),
       error: (e, _) => Padding(
           padding: const EdgeInsets.all(16),

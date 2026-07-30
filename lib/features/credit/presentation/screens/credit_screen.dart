@@ -97,6 +97,7 @@ class _CreditScreenState extends ConsumerState<CreditScreen> {
       body: Column(
         children: [
           creditsAsync.when(
+            skipLoadingOnReload: true,
             loading: () => const SizedBox(height: 80, child: LinearProgressIndicator()),
             error: (_, __) => const SizedBox(),
             data: (credits) {
@@ -174,6 +175,7 @@ class _CreditScreenState extends ConsumerState<CreditScreen> {
           const Divider(height: 1),
           Expanded(
             child: creditsAsync.when(
+              skipLoadingOnReload: true,
               loading: () => const Center(child: CircularProgressIndicator(color: AppColors.primary)),
               error: (e, _) => Center(child: Text('Error: $e')),
               data: (credits) {

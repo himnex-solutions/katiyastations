@@ -86,6 +86,9 @@ class KitchenScreen extends ConsumerWidget {
           const OverdueKotAlarm(),
           Expanded(
             child: kotsAsync.when(
+        // Keep the current tickets on screen while a live event reloads them,
+        // so the kitchen list doesn't blink to a spinner on every KOT update.
+        skipLoadingOnReload: true,
         loading: () => const Center(child: CircularProgressIndicator(color: AppColors.primary)),
         error: (e, _) => Center(child: Text('Error: $e', style: const TextStyle(color: AppColors.error))),
         data: (kots) {

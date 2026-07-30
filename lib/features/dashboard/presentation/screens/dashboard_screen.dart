@@ -558,6 +558,7 @@ class _LiveOrdersSection extends ConsumerWidget {
     final fmt = NumberFormat('#,##0');
 
     return tablesAsync.when(
+      skipLoadingOnReload: true,
       loading: () => const Center(child: CircularProgressIndicator(color: AppColors.primary)),
       error: (e, _) => Text('Error: $e', style: const TextStyle(color: AppColors.error)),
       data: (tables) {
