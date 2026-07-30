@@ -20,6 +20,11 @@ class CacheKeys {
   static String offlineSession(String tableId) => 'offlineSession:$tableId';
 
   static const String offlineSessionPrefix = 'offlineSession:';
+
+  // A session settled while offline, keyed by sessionId — its bill is queued
+  // and assigns the real invoice number on sync.
+  static String billedOffline(String sessionId) => 'billedOffline:$sessionId';
+  static const String billedOfflinePrefix = 'billedOffline:';
 }
 
 class OfflineCache {
@@ -86,6 +91,29 @@ class OfflineCache {
         final decoded = jsonDecode(raw);
         if (decoded is Map<String, dynamic>) result[tableId] = decoded;
       } catch (_) {}
+    }
+    return result;
+  }
+
+  // ── Sessions billed offline ──────────────────────────────────
+  // A session settled while offline is recorded here (by sessionId) so this
+  // device frees the table right away and won't let it be re-billed. The queued
+  // bill assigns the official invoice number on sync, after which this marker is
+  // cleared (see SyncEngine._cleanupAfterSync).
+
+  Future<void> putBilledOfflineSession(String sessionId) =>
+      put(CacheKeys.billedOffline(sessionId), {'at': DateTime.now().toIso8601String()});
+
+  Future<void> removeBilledOfflineSession(String sessionId) =>
+      remove(CacheKeys.billedOffline(sessionId));
+
+  /// Session ids settled offline on this device and not yet synced.
+  Future<Set<String>> billedOfflineSessionIds() async {
+    final p = await _p;
+    final result = <String>{};
+    const fullPrefix = '$_prefix${CacheKeys.billedOfflinePrefix}';
+    for (final key in p.getKeys()) {
+      if (key.startsWith(fullPrefix)) result.add(key.substring(fullPrefix.length));
     }
     return result;
   }

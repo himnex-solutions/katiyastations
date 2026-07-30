@@ -53,6 +53,33 @@ Future<Map<String, Map<String, dynamic>>> _pendingOfflineSessions(bool online) a
   return live;
 }
 
+/// Session ids settled offline on this device that are still awaiting sync.
+/// When online, prune any whose bill op has already synced (no longer in the
+/// outbox) — the server has since billed and freed the table, so the local
+/// marker is stale. Offline, keep them all.
+Future<Set<String>> _billedOfflineSessions(bool online) async {
+  final ids = await OfflineCache.instance.billedOfflineSessionIds();
+  if (ids.isEmpty || !online) return ids;
+
+  final ops = await OfflineStore.instance.pendingOps();
+  final pendingBillSessions = <String>{};
+  for (final op in ops) {
+    if (op.entityType != 'bill') continue;
+    final m = RegExp(r'/sessions/([^/]+)/generate').firstMatch(op.endpoint);
+    if (m != null) pendingBillSessions.add(m.group(1)!);
+  }
+
+  final live = <String>{};
+  for (final sid in ids) {
+    if (pendingBillSessions.contains(sid)) {
+      live.add(sid);
+    } else {
+      await OfflineCache.instance.removeBilledOfflineSession(sid);
+    }
+  }
+  return live;
+}
+
 final tablesStreamProvider = FutureProvider<List<RestaurantTable>>((ref) async {
   final profile = ref.watch(authNotifierProvider).value;
   if (profile?.branchId == null) return [];
@@ -97,6 +124,21 @@ final tablesStreamProvider = FutureProvider<List<RestaurantTable>>((ref) async {
           status: TableStatus.occupied,
           currentSessionId: s['id'] as String?,
         );
+      }
+      return t;
+    }).toList();
+  }
+
+  // Free tables settled OFFLINE on this device. The server still shows them
+  // occupied until the queued bill syncs, so overlay them free here (and only
+  // here) — this is what lets the cashier close a table offline without it
+  // lingering "occupied" or being billable twice on this device.
+  final billedOffline = await _billedOfflineSessions(online);
+  if (billedOffline.isNotEmpty) {
+    tables = tables.map((t) {
+      final sid = t.currentSessionId;
+      if (sid != null && billedOffline.contains(sid)) {
+        return t.copyWith(status: TableStatus.available);
       }
       return t;
     }).toList();
@@ -147,6 +189,13 @@ final activeSessionsStreamProvider = FutureProvider<List<TableSession>>((ref) as
       final s = TableSession.fromJson(json);
       if (!ids.contains(s.id)) sessions = [...sessions, s];
     }
+  }
+
+  // Drop sessions settled offline on this device — their bill is queued, so
+  // they're no longer active here even though the server hasn't been told yet.
+  final billedOffline = await _billedOfflineSessions(online);
+  if (billedOffline.isNotEmpty) {
+    sessions = sessions.where((s) => !billedOffline.contains(s.id)).toList();
   }
   return sessions;
 });

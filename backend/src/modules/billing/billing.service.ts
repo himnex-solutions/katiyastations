@@ -60,6 +60,15 @@ export class BillingService {
    * matching the cashier screen's single "Settle Bill" button.
    */
   async generate(sessionId: string, currentUser: CurrentUserPayload, dto: GenerateBillDto) {
+    // Idempotent replay of an offline-settled bill: it carries its own client
+    // id, so a retried sync returns the bill already stored rather than billing
+    // the session twice. Checked before the "already billed" guard so replaying
+    // the SAME bill still succeeds even though the session is now billed.
+    if (dto.id) {
+      const existing = await this.prisma.bill.findUnique({ where: { id: dto.id } });
+      if (existing) return existing;
+    }
+
     const session = await this.prisma.tableSession.findUnique({ where: { id: sessionId } });
     if (!session) throw new NotFoundException('Session not found');
     if (session.status === 'billed') {
@@ -110,6 +119,9 @@ export class BillingService {
 
       const created = await tx.bill.create({
         data: {
+          id: dto.id, // undefined → Prisma applies @default(uuid())
+          // Offline bills carry the real sale time so reports credit the right day.
+          ...(dto.soldAt ? { createdAt: new Date(dto.soldAt) } : {}),
           branchId: session.branchId,
           sessionId: session.id,
           tableId: session.tableId,

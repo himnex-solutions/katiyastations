@@ -9,6 +9,8 @@ import '../../../../core/constants/app_constants.dart';
 import '../../../../core/constants/api_constants.dart';
 import '../../../../core/network/api_client.dart';
 import '../../../../core/offline/connectivity_provider.dart';
+import '../../../../core/offline/offline_cache.dart';
+import '../../../../core/offline/offline_ids.dart';
 import '../../../../core/offline/offline_store.dart';
 import '../../../../core/offline/sync_engine.dart';
 import '../../../../core/printing/print_actions.dart';
@@ -2930,6 +2932,105 @@ class _CashierScreenState extends ConsumerState<CashierScreen>
     return proceed == true;
   }
 
+  /// Settles a bill while OFFLINE. Saves it to the sync outbox with a client
+  /// bill id, frees the table on this device, and prints a PROVISIONAL receipt
+  /// (no official invoice number yet). On reconnect the sync engine replays it
+  /// and the server mints the real, sequential invoice number — idempotently,
+  /// so it can never bill the session twice.
+  Future<void> _settleBillOffline(String sid, double subtotal,
+      double serviceCharge, double vat, double total, List items) async {
+    setState(() => _processing = true);
+    try {
+      final billId = newOfflineId();
+      final now = DateTime.now();
+      final cashTendered =
+          _paymentMethod == 'cash' ? double.tryParse(_amountCtrl.text.trim()) : null;
+
+      // Queue the settle for the server to finalise (assigns the invoice number,
+      // records payment, deducts stock) — idempotent on billId.
+      await OfflineStore.instance.enqueue(
+        entityType: 'bill',
+        operation: 'create',
+        endpoint: ApiConstants.generateBill(sid),
+        method: 'POST',
+        payload: {
+          'id': billId,
+          'discount': _discount,
+          'paymentMethod': _paymentMethod,
+          if (cashTendered != null) 'amountPaid': cashTendered,
+          'applyServiceCharge': _applyServiceCharge,
+          'applyVat': _applyVat,
+          if (_customerName != null) 'customerName': _customerName,
+          if (_customerPhone != null) 'customerPhone': _customerPhone,
+          'soldAt': now.toIso8601String(),
+        },
+      );
+
+      // Free the table on THIS device so it isn't billed twice while queued.
+      await OfflineCache.instance.putBilledOfflineSession(sid);
+
+      // Print a provisional receipt — no invoice number, so it prints as
+      // "BILL (not a tax invoice)"; the numbered invoice follows on sync.
+      final table = ref
+          .read(tablesStreamProvider)
+          .value
+          ?.where((t) => t.id == _selectedTableId)
+          .firstOrNull;
+      final profile = ref.read(authNotifierProvider).value;
+      if (mounted) {
+        _printReceipt({
+          'customer_name': _customerName,
+          if (_customerPhone != null) 'customer_phone': _customerPhone,
+          'cashier_name': profile?.fullName,
+          'table_number': table?.tableNumber,
+          'payment_method': _paymentMethod,
+          'sub_total': subtotal,
+          'discount': _discount,
+          'service_charge': serviceCharge,
+          'vat_amount': vat,
+          'total_amount': total,
+          if (cashTendered != null) 'amount_paid': cashTendered,
+          if (cashTendered != null && _paymentMethod == 'cash')
+            'change_amount':
+                (cashTendered - total) > 0 ? cashTendered - total : 0,
+          'created_at': now.toIso8601String(),
+        }, items);
+      }
+
+      // Refresh: free the table + drop it from the active list, update the badge.
+      ref.invalidate(tablesStreamProvider);
+      ref.invalidate(activeSessionsStreamProvider);
+      if (_selectedTableId != null) {
+        ref.invalidate(tableSessionProvider(_selectedTableId!));
+      }
+      ref.invalidate(sessionKotsProvider(sid));
+      ref.invalidate(sessionBillingProvider(sid));
+      await ref.read(pendingSyncProvider.notifier).refresh();
+
+      if (mounted) {
+        setState(() {
+          _selectedSessionId = null;
+          _selectedTableId = null;
+          _customerName = null;
+          _customerPhone = null;
+          _discount = 0;
+          _discountCtrl.text = '0';
+          _amountCtrl.clear();
+        });
+        _snack(
+            'Saved offline — the bill syncs and gets its invoice number when '
+            'the connection is back.',
+            AppColors.success,
+            Icons.cloud_off_rounded);
+      }
+    } catch (e) {
+      _snack('Failed to save offline bill: $e', AppColors.error,
+          Icons.error_outline_rounded);
+    } finally {
+      if (mounted) setState(() => _processing = false);
+    }
+  }
+
   Future<void> _settleBill(
       double total,
       double subtotal,
@@ -2939,14 +3040,14 @@ class _CashierScreenState extends ConsumerState<CashierScreen>
       List items,
       Map<String, dynamic> data) async {
     if (_selectedSessionId == null || _selectedTableId == null) return;
-    // Settling a bill (invoice number, payment, stock) must happen on the
-    // server — don't hang for the network timeout offline; say so at once.
+
+    // Offline: settle locally — save a provisional bill, print it, free the
+    // table on this device, and queue it so the server assigns the official
+    // invoice number on sync. (The server-side safeguard below needs a
+    // connection, so it's skipped on this path.)
     if (!ref.read(connectivityProvider)) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        backgroundColor: AppColors.warning,
-        behavior: SnackBarBehavior.floating,
-        content: Text('Settling a bill needs an internet connection. Reconnect and try again.'),
-      ));
+      await _settleBillOffline(
+          _selectedSessionId!, subtotal, serviceCharge, vat, total, items);
       return;
     }
 

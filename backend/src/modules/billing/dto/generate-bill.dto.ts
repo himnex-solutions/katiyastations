@@ -1,4 +1,4 @@
-import { IsBoolean, IsIn, IsNumber, IsOptional, IsString, Min } from 'class-validator';
+import { IsBoolean, IsDateString, IsIn, IsNumber, IsOptional, IsString, Min } from 'class-validator';
 
 export const PAYMENT_METHOD_VALUES = [
   'cash',
@@ -13,6 +13,18 @@ export const PAYMENT_METHOD_VALUES = [
 ] as const;
 
 export class GenerateBillDto {
+  /** Client-generated bill id. Lets a bill settled OFFLINE sync idempotently —
+   * replaying it returns the existing bill instead of creating a duplicate. */
+  @IsOptional()
+  @IsString()
+  id?: string;
+
+  /** When the sale actually happened (ISO). For an offline bill synced later,
+   * this keeps the sale on the day it was made in reports, not the sync day. */
+  @IsOptional()
+  @IsDateString()
+  soldAt?: string;
+
   @IsOptional()
   @IsNumber()
   @Min(0)

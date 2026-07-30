@@ -135,12 +135,26 @@ class SyncEngine {
     } else if (op.entityType == 'session') {
       final tableId = _tableIdFromOpenEndpoint(op.endpoint);
       if (tableId != null) await OfflineCache.instance.removeOfflineSession(tableId);
+    } else if (op.entityType == 'bill') {
+      // The offline bill just synced — the server has billed the session and
+      // freed the table (and assigned the official invoice number), so drop the
+      // local "billed offline" marker; server truth now stands.
+      final sessionId = _sessionIdFromBillEndpoint(op.endpoint);
+      if (sessionId != null) {
+        await OfflineCache.instance.removeBilledOfflineSession(sessionId);
+      }
     }
   }
 
   String? _tableIdFromOpenEndpoint(String endpoint) {
     // Endpoint shape: '/tables/<tableId>/open'
     final match = RegExp(r'/tables/([^/]+)/open').firstMatch(endpoint);
+    return match?.group(1);
+  }
+
+  String? _sessionIdFromBillEndpoint(String endpoint) {
+    // Endpoint shape: '/billing/sessions/<sessionId>/generate'
+    final match = RegExp(r'/sessions/([^/]+)/generate').firstMatch(endpoint);
     return match?.group(1);
   }
 
