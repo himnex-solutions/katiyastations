@@ -18,9 +18,10 @@ import { buildPaginationMeta } from '../../common/dto/pagination.dto';
 import { BranchFilterDto } from '../../common/dto/branch-filter.dto';
 import { nextSequenceNumber } from '../../common/utils/sequence.util';
 
-/** Only a manager (or the accountant who owns the books) may reverse settled
- * money — a cashier can take payment but not undo one. */
-const REFUND_ROLES = ['branch_manager', 'accountant'];
+/** Who may reverse settled money. The cashier owns the till at the counter, so
+ * they can void/refund a bill they just settled — alongside managers and the
+ * accountant who owns the books. */
+const REFUND_ROLES = ['branch_manager', 'accountant', 'cashier'];
 
 @Injectable()
 export class BillingService {
@@ -260,7 +261,7 @@ export class BillingService {
    */
   async refund(billId: string, currentUser: CurrentUserPayload, dto: RefundBillDto) {
     if (!REFUND_ROLES.includes(currentUser.role)) {
-      throw new ForbiddenException('Only a manager or accountant can void or refund a bill');
+      throw new ForbiddenException('You do not have permission to void or refund a bill');
     }
 
     const bill = await this.findOne(billId);
