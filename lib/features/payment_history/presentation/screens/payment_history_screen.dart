@@ -152,7 +152,17 @@ class _PaymentHistoryScreenState extends ConsumerState<PaymentHistoryScreen> {
             error: (_, __) => const SizedBox(),
             data: (bills) {
               final f = _filter(bills);
-              final revenue = f.where((b) => b.paymentStatus == 'paid').fold(0.0, (s, b) => s + b.totalAmount);
+              // Revenue = every settled, money-collecting bill (paid AND
+              // partial_paid), excluding credit (shown separately) and any
+              // reversed bill (refunded/voided). Counting only 'paid' once left
+              // out older bills mislabeled 'partial_paid' by the earlier settle
+              // bug, so the total read low. This matches the shift report.
+              const reversed = {'refunded', 'voided'};
+              final revenue = f
+                  .where((b) =>
+                      b.paymentStatus != 'credit' &&
+                      !reversed.contains(b.paymentStatus))
+                  .fold(0.0, (s, b) => s + b.totalAmount);
               final credit = f.where((b) => b.paymentStatus == 'credit').fold(0.0, (s, b) => s + b.totalAmount);
               return Container(
                 color: AppColors.surface,
@@ -183,12 +193,23 @@ class _PaymentHistoryScreenState extends ConsumerState<PaymentHistoryScreen> {
                   itemCount: f.length,
                   itemBuilder: (ctx, i) {
                     final bill = f[i];
+                    final isPartial = bill.paymentStatus == 'partial_paid';
                     final reversible = canRefund &&
                         bill.paymentStatus != 'refunded' &&
                         bill.paymentStatus != 'voided';
+                    // A part-settled bill offers "collect the rest" first; other
+                    // settled bills open the void/refund sheet as before. Both
+                    // require the same permission that gates a refund.
+                    final onTap = !canRefund
+                        ? null
+                        : isPartial
+                            ? () => _showCollectRemainingSheet(bill)
+                            : reversible
+                                ? () => _showRefundSheet(bill)
+                                : null;
                     return InkWell(
                       borderRadius: BorderRadius.circular(12),
-                      onTap: reversible ? () => _showRefundSheet(bill) : null,
+                      onTap: onTap,
                       child: _PaymentCard(bill: bill, fmt: fmt),
                     ).animate().fadeIn(delay: Duration(milliseconds: i * 25));
                   },
@@ -210,6 +231,33 @@ class _PaymentHistoryScreenState extends ConsumerState<PaymentHistoryScreen> {
   Future<void> _pickRange() async {
     final picked = await showDateRangePicker(context: context, firstDate: DateTime(2024), lastDate: DateTime.now(), initialDateRange: _range);
     if (picked != null) setState(() => _range = picked);
+  }
+
+  /// Collect the outstanding balance on a part-settled bill. On success the
+  /// backend records the extra tender and flips the bill to 'paid'.
+  Future<void> _showCollectRemainingSheet(Bill bill) async {
+    final result = await showModalBottomSheet<Object?>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: AppColors.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
+      ),
+      builder: (_) => _CollectRemainingSheet(bill: bill, fmt: fmt),
+    );
+    if (result == true) {
+      ref.invalidate(billsStreamProvider);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+              content: Text('Payment collected — bill settled'),
+              backgroundColor: AppColors.success),
+        );
+      }
+    } else if (result == 'refund') {
+      // Cashier chose to reverse this part-settled bill instead of topping it up.
+      await _showRefundSheet(bill);
+    }
   }
 
   Future<void> _showRefundSheet(Bill bill) async {
@@ -338,6 +386,155 @@ class _RefundSheetState extends ConsumerState<_RefundSheet> {
   }
 }
 
+/// Collect the outstanding balance on a `partial_paid` bill. Pre-fills the
+/// amount with the remaining due and posts an extra tender; the backend adds it
+/// to what was already paid and flips the bill to 'paid' once covered.
+class _CollectRemainingSheet extends ConsumerStatefulWidget {
+  final Bill bill;
+  final NumberFormat fmt;
+  const _CollectRemainingSheet({required this.bill, required this.fmt});
+  @override
+  ConsumerState<_CollectRemainingSheet> createState() => _CollectRemainingSheetState();
+}
+
+class _CollectRemainingSheetState extends ConsumerState<_CollectRemainingSheet> {
+  static const _methods = ['cash', 'card', 'esewa', 'khalti', 'fonepay'];
+  late final TextEditingController _amount;
+  String _method = 'cash';
+  bool _busy = false;
+
+  double get _due => widget.bill.totalAmount - widget.bill.amountPaid;
+
+  @override
+  void initState() {
+    super.initState();
+    _amount = TextEditingController(text: _due.toStringAsFixed(2));
+  }
+
+  @override
+  void dispose() {
+    _amount.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    final amount = double.tryParse(_amount.text.trim()) ?? 0;
+    if (amount < 0.01) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Enter an amount to collect'), backgroundColor: AppColors.error),
+      );
+      return;
+    }
+    setState(() => _busy = true);
+    try {
+      await ApiClient.instance.post(
+        ApiConstants.addBillPayment(widget.bill.id),
+        data: {'method': _method, 'amount': amount},
+      );
+      if (mounted) Navigator.pop(context, true);
+    } catch (e) {
+      if (mounted) {
+        setState(() => _busy = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed: $e'), backgroundColor: AppColors.error),
+        );
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.only(
+        left: 20, right: 20, top: 18,
+        bottom: MediaQuery.of(context).viewInsets.bottom + 20,
+      ),
+      child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          const Icon(Icons.payments_rounded, color: AppColors.success, size: 20),
+          const SizedBox(width: 8),
+          Text('Collect Remaining', style: GoogleFonts.outfit(fontSize: 17, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+        ]),
+        const SizedBox(height: 4),
+        Text('${widget.bill.invoiceNumber} • ${widget.bill.customerName ?? 'Walk-in'}',
+            style: GoogleFonts.outfit(fontSize: 12, color: AppColors.textSecondary)),
+        const SizedBox(height: 14),
+        // Total / paid / due breakdown.
+        Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: AppColors.surfaceVariant,
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Column(children: [
+            _row('Bill total', widget.bill.totalAmount, AppColors.textPrimary),
+            const SizedBox(height: 4),
+            _row('Already paid', widget.bill.amountPaid, AppColors.textSecondary),
+            const Divider(height: 16),
+            _row('Balance due', _due, AppColors.error, bold: true),
+          ]),
+        ),
+        const SizedBox(height: 14),
+        Text('Payment method', style: GoogleFonts.outfit(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textSecondary)),
+        const SizedBox(height: 6),
+        Wrap(
+          spacing: 8,
+          children: _methods.map((m) {
+            final sel = _method == m;
+            return ChoiceChip(
+              label: Text(m.toUpperCase()),
+              selected: sel,
+              labelStyle: GoogleFonts.outfit(
+                  fontSize: 11.5,
+                  fontWeight: FontWeight.w600,
+                  color: sel ? Colors.white : AppColors.textSecondary),
+              selectedColor: AppColors.primary,
+              onSelected: (_) => setState(() => _method = m),
+            );
+          }).toList(),
+        ),
+        const SizedBox(height: 14),
+        TextField(
+          controller: _amount,
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          decoration: const InputDecoration(
+            labelText: 'Amount collected (NPR)',
+            isDense: true,
+            prefixIcon: Icon(Icons.account_balance_wallet_outlined, size: 18),
+          ),
+        ),
+        const SizedBox(height: 18),
+        Row(children: [
+          Expanded(child: OutlinedButton(onPressed: _busy ? null : () => Navigator.pop(context), child: const Text('Cancel'))),
+          const SizedBox(width: 12),
+          Expanded(child: FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: AppColors.success),
+            onPressed: _busy ? null : _submit,
+            child: _busy
+                ? const SizedBox(height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                : const Text('Collect Payment'),
+          )),
+        ]),
+        Center(
+          child: TextButton.icon(
+            icon: const Icon(Icons.undo_rounded, size: 15, color: AppColors.error),
+            label: Text('Void / refund this bill instead',
+                style: GoogleFonts.outfit(fontSize: 12, color: AppColors.error)),
+            onPressed: _busy ? null : () => Navigator.pop(context, 'refund'),
+          ),
+        ),
+      ]),
+    );
+  }
+
+  Widget _row(String label, double value, Color color, {bool bold = false}) {
+    return Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+      Text(label, style: GoogleFonts.outfit(fontSize: 13, color: AppColors.textSecondary, fontWeight: bold ? FontWeight.w700 : FontWeight.w400)),
+      Text('NPR ${widget.fmt.format(value)}', style: GoogleFonts.outfit(fontSize: 13, fontWeight: bold ? FontWeight.w800 : FontWeight.w600, color: color)),
+    ]);
+  }
+}
+
 class _SCard extends StatelessWidget {
   final String label, value; final Color color;
   const _SCard(this.label, this.value, this.color);
@@ -386,6 +583,19 @@ class _PaymentCard extends StatelessWidget {
           Text(bill.invoiceNumber, style: GoogleFonts.outfit(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
           Text('${bill.customerName ?? 'Walk-in'} • ${bill.paymentMethod.toUpperCase()} • ${formatShortDateTime(bill.createdAt)}',
               style: GoogleFonts.outfit(fontSize: 12, color: AppColors.textSecondary)),
+          // For a part-settled bill, spell out how much is in and how much is
+          // still owed — the numbers exist on the bill but were never shown.
+          if (bill.paymentStatus == 'partial_paid')
+            Padding(
+              padding: const EdgeInsets.only(top: 3),
+              child: Text(
+                'Paid NPR ${fmt.format(bill.amountPaid)} • Due NPR ${fmt.format(bill.totalAmount - bill.amountPaid)}',
+                style: GoogleFonts.outfit(
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.error),
+              ),
+            ),
         ])),
         Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
           Text('NPR ${fmt.format(bill.totalAmount)}', style: GoogleFonts.outfit(fontSize: 15, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
