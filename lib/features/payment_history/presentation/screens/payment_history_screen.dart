@@ -20,17 +20,43 @@ final billsStreamProvider =
   // Payment history lives on the server; offline, return empty instantly
   // instead of hanging on a call that will time out.
   if (!ref.read(connectivityProvider)) return const [];
-  final response = await ApiClient.instance.get(
-    ApiConstants.paymentHistory,
-    queryParameters: {'branchId': profile!.branchId!, 'limit': '100'},
-  );
-  final data = response.data as Map<String, dynamic>;
-  final rows = List<Map<String, dynamic>>.from(data['data'] as List? ?? []);
-  return rows.map((r) => Bill.fromJson(r)).where((b) {
-    if (range == null) return true;
-    return b.createdAt.isAfter(range.start) &&
-        b.createdAt.isBefore(range.end.add(const Duration(days: 1)));
-  }).toList();
+
+  // Base query. A selected date range is sent to the SERVER (in UTC, so the
+  // device's local Nepal-day boundaries map to the right instants) — the server
+  // then filters over ALL bills, not just the latest page. Without this, a past
+  // day's bills (e.g. invoices 000001–000032 from an earlier date) sat beyond
+  // the 100-row cap and never loaded — invisible in both the list and the
+  // revenue tally that sums it.
+  final baseQuery = <String, String>{
+    'branchId': profile!.branchId!,
+    'limit': '100',
+  };
+  if (range != null) {
+    baseQuery['startDate'] = range.start.toUtc().toIso8601String();
+    baseQuery['endDate'] =
+        range.end.add(const Duration(days: 1)).toUtc().toIso8601String();
+  }
+
+  // Walk every page for the current query so nothing is silently truncated.
+  // The 50-page ceiling (~5000 bills) is a runaway guard; a chosen date range
+  // keeps the set small, and the loop stops as soon as the last page is read.
+  final all = <Bill>[];
+  var page = 1;
+  const maxPages = 50;
+  while (page <= maxPages) {
+    final response = await ApiClient.instance.get(
+      ApiConstants.paymentHistory,
+      queryParameters: {...baseQuery, 'page': '$page'},
+    );
+    final data = response.data as Map<String, dynamic>;
+    final rows = List<Map<String, dynamic>>.from(data['data'] as List? ?? []);
+    all.addAll(rows.map((r) => Bill.fromJson(r)));
+    final meta = data['meta'] as Map<String, dynamic>?;
+    final totalPages = (meta?['totalPages'] as num?)?.toInt() ?? 1;
+    if (rows.isEmpty || page >= totalPages) break;
+    page++;
+  }
+  return all;
 });
 
 class PaymentHistoryScreen extends ConsumerStatefulWidget {

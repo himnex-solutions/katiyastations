@@ -34,7 +34,16 @@ export class BillingService {
 
   async findAll(currentUser: CurrentUserPayload, filter: BranchFilterDto) {
     const branchId = resolveBranchScope(currentUser, filter.branchId);
-    const where = branchId ? { branchId } : {};
+    const where: any = branchId ? { branchId } : {};
+
+    // Optional date window (payment history for a past day). Filtering here — on
+    // the server, over ALL bills — instead of on the client's capped recent page
+    // is what lets an older day's bills (and their revenue) surface at all.
+    if (filter.startDate || filter.endDate) {
+      where.createdAt = {};
+      if (filter.startDate) where.createdAt.gte = new Date(filter.startDate);
+      if (filter.endDate) where.createdAt.lt = new Date(filter.endDate);
+    }
 
     const [items, total] = await Promise.all([
       this.prisma.bill.findMany({

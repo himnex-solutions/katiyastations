@@ -15,13 +15,30 @@ import '../../../../core/widgets/notification_bell.dart';
 final creditProvider = FutureProvider<List<CreditRecord>>((ref) async {
   final profile = ref.watch(authNotifierProvider).value;
   if (profile?.branchId == null) return [];
-  final response = await ApiClient.instance.get(
-    ApiConstants.credits,
-    queryParameters: {'branchId': profile!.branchId!},
-  );
-  final data = response.data as Map<String, dynamic>;
-  final rows = data['data'] as List<dynamic>;
-  return rows.map((r) => CreditRecord.fromJson(r as Map<String, dynamic>)).toList();
+  final branchId = profile!.branchId!;
+
+  // `/credits` is paginated and defaults to 20 rows. Sending no limit once
+  // capped this list at 20 accounts — so an older/other account never loaded and
+  // the search below couldn't find what was never fetched. Walk every page (100
+  // is the backend's @Max) so search covers ALL credit accounts.
+  final all = <CreditRecord>[];
+  var page = 1;
+  while (true) {
+    final response = await ApiClient.instance.get(
+      ApiConstants.credits,
+      queryParameters: {'branchId': branchId, 'page': '$page', 'limit': '100'},
+    );
+    final data = response.data as Map<String, dynamic>;
+    final rows = (data['data'] as List?) ?? const [];
+    all.addAll(
+      rows.map((r) => CreditRecord.fromJson(r as Map<String, dynamic>)),
+    );
+    final meta = data['meta'] as Map<String, dynamic>?;
+    final totalPages = (meta?['totalPages'] as num?)?.toInt() ?? 1;
+    if (rows.isEmpty || page >= totalPages) break;
+    page++;
+  }
+  return all;
 });
 
 class CreditScreen extends ConsumerStatefulWidget {
@@ -32,7 +49,15 @@ class CreditScreen extends ConsumerStatefulWidget {
 
 class _CreditScreenState extends ConsumerState<CreditScreen> {
   String _statusFilter = 'all';
+  String _search = '';
+  final _searchCtrl = TextEditingController();
   final fmt = NumberFormat('#,##0.00');
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -113,14 +138,57 @@ class _CreditScreenState extends ConsumerState<CreditScreen> {
               );
             },
           ),
+          // Search by customer name or phone across every credit account.
+          Container(
+            color: AppColors.surface,
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
+            child: TextField(
+              controller: _searchCtrl,
+              style: GoogleFonts.outfit(fontSize: 14, color: AppColors.textPrimary),
+              decoration: InputDecoration(
+                isDense: true,
+                hintText: 'Search by name or phone number',
+                hintStyle: GoogleFonts.outfit(fontSize: 13, color: AppColors.textHint),
+                prefixIcon: const Icon(Icons.search_rounded, size: 20, color: AppColors.textSecondary),
+                suffixIcon: _search.isEmpty
+                    ? null
+                    : IconButton(
+                        icon: const Icon(Icons.close_rounded, size: 18, color: AppColors.textSecondary),
+                        onPressed: () {
+                          _searchCtrl.clear();
+                          setState(() => _search = '');
+                        },
+                      ),
+                filled: true,
+                fillColor: AppColors.surfaceVariant,
+                contentPadding: const EdgeInsets.symmetric(vertical: 12, horizontal: 12),
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+                enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: const BorderSide(color: AppColors.primary, width: 1.4),
+                ),
+              ),
+              onChanged: (v) => setState(() => _search = v.trim().toLowerCase()),
+            ),
+          ),
           const Divider(height: 1),
           Expanded(
             child: creditsAsync.when(
               loading: () => const Center(child: CircularProgressIndicator(color: AppColors.primary)),
               error: (e, _) => Center(child: Text('Error: $e')),
               data: (credits) {
-                final filtered = _statusFilter == 'all' ? credits : credits.where((c) => _statusFilter == 'overdue' ? c.isOverdue : c.status == _statusFilter).toList();
-                if (filtered.isEmpty) return Center(child: Text('No credit records', style: GoogleFonts.outfit(color: AppColors.textSecondary)));
+                var filtered = _statusFilter == 'all' ? credits : credits.where((c) => _statusFilter == 'overdue' ? c.isOverdue : c.status == _statusFilter).toList();
+                if (_search.isNotEmpty) {
+                  filtered = filtered.where((c) =>
+                      c.customerName.toLowerCase().contains(_search) ||
+                      (c.customerPhone ?? '').toLowerCase().contains(_search)).toList();
+                }
+                if (filtered.isEmpty) {
+                  return Center(
+                      child: Text(_search.isEmpty ? 'No credit records' : 'No match for "$_search"',
+                          style: GoogleFonts.outfit(color: AppColors.textSecondary)));
+                }
                 return ResponsiveContent(child: ListView.builder(
                   padding: const EdgeInsets.all(16),
                   itemCount: filtered.length,
