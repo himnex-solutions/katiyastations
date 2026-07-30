@@ -91,12 +91,16 @@ export class BillingService {
     const totalAmount = afterService + vatAmount;
     const paymentMethod = dto.paymentMethod ?? 'cash';
     const amountPaid = dto.amountPaid ?? totalAmount;
-    // Was previously hardcoded 'paid' for any non-credit method, even if
-    // amountPaid was less than totalAmount — compute it properly so a
-    // cashier settling for less than the total (partial tender) is
-    // correctly tracked as partial_paid, not silently marked paid.
+    // A non-credit settle is 'paid' when the tender covers the total. The 0.01
+    // tolerance absorbs client-side rounding (e.g. a service-charge computed to
+    // a fraction of a paisa) so a full payment is never mis-flagged
+    // 'partial_paid'. A genuinely short cash tender still records as partial.
     const paymentStatus =
-      paymentMethod === 'credit' ? 'credit' : amountPaid >= totalAmount ? 'paid' : 'partial_paid';
+      paymentMethod === 'credit'
+        ? 'credit'
+        : amountPaid >= totalAmount - 0.01
+          ? 'paid'
+          : 'partial_paid';
 
     const bill = await this.prisma.$transaction(async (tx) => {
       // Allocated atomically from a per-branch counter inside this transaction,

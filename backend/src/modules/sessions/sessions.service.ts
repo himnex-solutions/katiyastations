@@ -105,6 +105,36 @@ export class SessionsService {
     return sessions.map(toSessionResponse);
   }
 
+  /** The cashier's history of SETTLED online orders — each with its KOT items
+   * (carrying the station `type` food/drink/bar) and the settled bill, so the
+   * cashier can see what went to the kitchen vs the bar and the invoice total. */
+  async findOnlineOrderHistory(currentUser: CurrentUserPayload, branchId?: string, limit = 30) {
+    const scoped = resolveBranchScope(currentUser, branchId);
+    const take = Math.min(Math.max(limit, 1), 100);
+    const sessions = await this.prisma.tableSession.findMany({
+      where: {
+        ...(scoped ? { branchId: scoped } : {}),
+        type: 'online',
+        status: 'billed',
+      },
+      include: {
+        waiter: { select: { fullName: true } },
+        kots: {
+          where: { status: { not: 'cancelled' } },
+          include: { items: { where: { status: { not: 'cancelled' } } } },
+          orderBy: { createdAt: 'asc' },
+        },
+        bills: { orderBy: { createdAt: 'desc' }, take: 1 },
+      },
+      orderBy: { closedAt: 'desc' },
+      take,
+    });
+    return sessions.map((s: any) => {
+      const { waiter, bills, ...rest } = s;
+      return { ...rest, waiterName: waiter?.fullName ?? null, bill: bills?.[0] ?? null };
+    });
+  }
+
   async kots(sessionId: string) {
     await this.findOne(sessionId);
     return this.kotsService.bySession(sessionId);

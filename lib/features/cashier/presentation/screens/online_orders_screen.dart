@@ -21,6 +21,7 @@ import '../../../../core/offline/connectivity_provider.dart';
 import '../../../../core/offline/offline_ids.dart';
 import '../../../../core/printing/print_actions.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
+import '../../../branches/presentation/providers/branch_provider.dart';
 import '../../../menu/domain/entities/menu_entities.dart';
 import '../../../orders/domain/entities/order_entities.dart';
 import '../../../orders/presentation/providers/order_provider.dart';
@@ -114,16 +115,38 @@ final onlineOrdersProvider = FutureProvider<List<Map<String, dynamic>>>((ref) as
   return List<Map<String, dynamic>>.from(res.data as List? ?? []);
 });
 
+/// Settled online orders — the cashier's history, server-backed so it's shared
+/// across every till. Each entry carries its KOT items (with station `type`) so
+/// the cashier can see what went to the kitchen vs the bar.
+final onlineOrderHistoryProvider = FutureProvider<List<Map<String, dynamic>>>((ref) async {
+  final profile = ref.watch(authNotifierProvider).value;
+  if (profile?.branchId == null) return const [];
+  if (!ref.read(connectivityProvider)) return const [];
+  final res = await ApiClient.instance.get(
+    ApiConstants.onlineOrderHistory,
+    queryParameters: {'branchId': profile!.branchId!, 'limit': '40'},
+  );
+  return List<Map<String, dynamic>>.from(res.data as List? ?? []);
+});
+
 // ════════════════════════════════════════════════════════════
 //  SCREEN
 // ════════════════════════════════════════════════════════════
-class OnlineOrdersScreen extends ConsumerWidget {
+class OnlineOrdersScreen extends ConsumerStatefulWidget {
   const OnlineOrdersScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<OnlineOrdersScreen> createState() => _OnlineOrdersScreenState();
+}
+
+class _OnlineOrdersScreenState extends ConsumerState<OnlineOrdersScreen> {
+  int _tab = 0; // 0 = active (drafts + unpaid), 1 = history (settled)
+
+  @override
+  Widget build(BuildContext context) {
     final drafts = ref.watch(onlineDraftsProvider);
     final ordersAsync = ref.watch(onlineOrdersProvider);
+    final historyAsync = ref.watch(onlineOrderHistoryProvider);
 
     return Scaffold(
       backgroundColor: AppColors.background,
@@ -134,56 +157,151 @@ class OnlineOrdersScreen extends ConsumerWidget {
           IconButton(
             tooltip: 'Refresh',
             icon: const Icon(Icons.refresh_rounded),
-            onPressed: () => ref.invalidate(onlineOrdersProvider),
+            onPressed: () {
+              ref.invalidate(onlineOrdersProvider);
+              ref.invalidate(onlineOrderHistoryProvider);
+            },
           ),
         ],
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        backgroundColor: AppColors.primary,
-        icon: const Icon(Icons.add_rounded, color: Colors.white),
-        label: Text('New Online Order',
-            style: GoogleFonts.outfit(color: Colors.white, fontWeight: FontWeight.w600)),
-        onPressed: () => _openBuilder(context, ref, null),
-      ),
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 16, 16, 96),
+      floatingActionButton: _tab == 0
+          ? FloatingActionButton.extended(
+              backgroundColor: AppColors.primary,
+              icon: const Icon(Icons.add_rounded, color: Colors.white),
+              label: Text('New Online Order',
+                  style: GoogleFonts.outfit(color: Colors.white, fontWeight: FontWeight.w600)),
+              onPressed: () => _openBuilder(context, null),
+            )
+          : null,
+      body: Column(
         children: [
-          if (drafts.isNotEmpty) ...[
-            _sectionLabel('Drafts (not sent yet)'),
-            ...drafts.map((d) => _DraftCard(
-                  draft: d,
-                  onEdit: () => _openBuilder(context, ref, d),
-                  onDelete: () => ref.read(onlineDraftsProvider.notifier).remove(d.id),
-                  onSend: () => _sendAndPrint(context, ref, d),
-                )),
-            const SizedBox(height: 20),
-          ],
-          _sectionLabel('Sent — awaiting payment'),
-          ordersAsync.when(
-            loading: () => const Padding(
-                padding: EdgeInsets.all(24),
-                child: Center(child: CircularProgressIndicator(color: AppColors.primary))),
-            error: (e, _) => Padding(
-                padding: const EdgeInsets.all(16),
-                child: Text('Could not load: $e',
-                    style: GoogleFonts.outfit(color: AppColors.textSecondary))),
-            data: (orders) => orders.isEmpty
-                ? Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Text('No unpaid online orders.',
-                        style: GoogleFonts.outfit(color: AppColors.textHint)))
-                : Column(
-                    children: orders
-                        .map((o) => _OrderCard(
-                              order: o,
-                              onReprint: () => _reprint(context, ref, o),
-                              onSettle: () => _settle(context, ref, o),
-                            ))
-                        .toList(),
-                  ),
+          _tabBar(ordersAsync.valueOrNull?.length ?? 0),
+          Expanded(
+            child: _tab == 0
+                ? _activeList(context, drafts, ordersAsync)
+                : _historyList(context, historyAsync),
           ),
         ],
       ),
+    );
+  }
+
+  Widget _tabBar(int unpaidCount) {
+    Widget seg(int i, IconData icon, String label) {
+      final sel = _tab == i;
+      return Expanded(
+        child: GestureDetector(
+          onTap: () => setState(() => _tab = i),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 180),
+            margin: const EdgeInsets.all(4),
+            padding: const EdgeInsets.symmetric(vertical: 10),
+            decoration: BoxDecoration(
+              color: sel ? AppColors.primary : Colors.transparent,
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+              Icon(icon, size: 16, color: sel ? Colors.white : AppColors.textSecondary),
+              const SizedBox(width: 6),
+              Text(label,
+                  style: GoogleFonts.outfit(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                      color: sel ? Colors.white : AppColors.textSecondary)),
+            ]),
+          ),
+        ),
+      );
+    }
+
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+      decoration: BoxDecoration(
+        color: AppColors.card,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Row(children: [
+        seg(0, Icons.receipt_long_rounded, 'Active'),
+        seg(1, Icons.history_rounded, 'History'),
+      ]),
+    );
+  }
+
+  Widget _activeList(
+    BuildContext context,
+    List<OnlineDraft> drafts,
+    AsyncValue<List<Map<String, dynamic>>> ordersAsync,
+  ) {
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 96),
+      children: [
+        if (drafts.isNotEmpty) ...[
+          _sectionLabel('Drafts (not sent yet)'),
+          ...drafts.map((d) => _DraftCard(
+                draft: d,
+                onEdit: () => _openBuilder(context, d),
+                onDelete: () => ref.read(onlineDraftsProvider.notifier).remove(d.id),
+                onSend: () => _sendAndPrint(context, d),
+              )),
+          const SizedBox(height: 20),
+        ],
+        _sectionLabel('Sent — awaiting payment'),
+        ordersAsync.when(
+          loading: () => const Padding(
+              padding: EdgeInsets.all(24),
+              child: Center(child: CircularProgressIndicator(color: AppColors.primary))),
+          error: (e, _) => Padding(
+              padding: const EdgeInsets.all(16),
+              child: Text('Could not load: $e',
+                  style: GoogleFonts.outfit(color: AppColors.textSecondary))),
+          data: (orders) => orders.isEmpty
+              ? Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Text('No unpaid online orders.',
+                      style: GoogleFonts.outfit(color: AppColors.textHint)))
+              : Column(
+                  children: orders
+                      .map((o) => _OrderCard(
+                            order: o,
+                            onReprint: () => _reprint(context, o),
+                            onSettle: () => _settle(context, o),
+                          ))
+                      .toList(),
+                ),
+        ),
+      ],
+    );
+  }
+
+  Widget _historyList(
+    BuildContext context,
+    AsyncValue<List<Map<String, dynamic>>> historyAsync,
+  ) {
+    return historyAsync.when(
+      loading: () => const Center(child: CircularProgressIndicator(color: AppColors.primary)),
+      error: (e, _) => Padding(
+          padding: const EdgeInsets.all(16),
+          child: Text('Could not load history: $e',
+              style: GoogleFonts.outfit(color: AppColors.textSecondary))),
+      data: (orders) => orders.isEmpty
+          ? Center(
+              child: Column(mainAxisSize: MainAxisSize.min, children: [
+              const Icon(Icons.history_toggle_off_rounded, size: 48, color: AppColors.textHint),
+              const SizedBox(height: 10),
+              Text('No settled online orders yet.',
+                  style: GoogleFonts.outfit(color: AppColors.textHint)),
+            ]))
+          : ListView(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+              children: [
+                _sectionLabel('Settled — order history'),
+                ...orders.map((o) => _HistoryCard(
+                      order: o,
+                      onReprint: () => _reprint(context, o),
+                    )),
+              ],
+            ),
     );
   }
 
@@ -194,7 +312,7 @@ class OnlineOrdersScreen extends ConsumerWidget {
                 fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.textSecondary)),
       );
 
-  Future<void> _openBuilder(BuildContext context, WidgetRef ref, OnlineDraft? existing) async {
+  Future<void> _openBuilder(BuildContext context, OnlineDraft? existing) async {
     await showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -206,7 +324,7 @@ class OnlineOrdersScreen extends ConsumerWidget {
   }
 
   // Create the online session + KOT, print the tickets, drop the draft.
-  Future<void> _sendAndPrint(BuildContext context, WidgetRef ref, OnlineDraft d) async {
+  Future<void> _sendAndPrint(BuildContext context, OnlineDraft d) async {
     final messenger = ScaffoldMessenger.of(context);
     if (!ref.read(connectivityProvider)) {
       messenger.showSnackBar(const SnackBar(
@@ -243,6 +361,7 @@ class OnlineOrdersScreen extends ConsumerWidget {
 
       await ref.read(onlineDraftsProvider.notifier).remove(d.id);
       ref.invalidate(onlineOrdersProvider);
+      ref.invalidate(onlineOrderHistoryProvider);
       messenger.showSnackBar(const SnackBar(
           backgroundColor: AppColors.success,
           content: Text('Online order sent to kitchen/bar and printed.')));
@@ -253,7 +372,7 @@ class OnlineOrdersScreen extends ConsumerWidget {
   }
 
   // Reprint an already-sent order's tickets.
-  Future<void> _reprint(BuildContext context, WidgetRef ref, Map<String, dynamic> order) async {
+  Future<void> _reprint(BuildContext context, Map<String, dynamic> order) async {
     final messenger = ScaffoldMessenger.of(context);
     try {
       final sessionId = order['id'] as String;
@@ -274,7 +393,7 @@ class OnlineOrdersScreen extends ConsumerWidget {
     }
   }
 
-  Future<void> _settle(BuildContext context, WidgetRef ref, Map<String, dynamic> order) async {
+  Future<void> _settle(BuildContext context, Map<String, dynamic> order) async {
     await showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -283,6 +402,107 @@ class OnlineOrdersScreen extends ConsumerWidget {
           borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (_) => _SettleOnlineSheet(order: order),
     );
+  }
+}
+
+// ── History card: a settled online order with its kitchen/bar items ─────────
+class _HistoryCard extends StatelessWidget {
+  final Map<String, dynamic> order;
+  final VoidCallback onReprint;
+  const _HistoryCard({required this.order, required this.onReprint});
+
+  @override
+  Widget build(BuildContext context) {
+    final name = (order['customer_name'] as String?) ?? 'Online customer';
+    final phone = order['customer_phone'] as String?;
+    final bill = order['bill'] as Map<String, dynamic>?;
+    final invoiceNo = bill?['invoice_number'] as String?;
+    final total = (bill?['total_amount'] as num?)?.toDouble() ??
+        (order['total_amount'] as num?)?.toDouble() ??
+        0;
+    final closedRaw = order['closed_at'] ?? order['created_at'];
+    final when = DateTime.tryParse(closedRaw?.toString() ?? '');
+
+    // Flatten every KOT's items and split by station.
+    final kitchen = <String>[];
+    final bar = <String>[];
+    for (final k in (order['kots'] as List? ?? const [])) {
+      if (k is! Map) continue;
+      for (final i in (k['items'] as List? ?? const [])) {
+        if (i is! Map) continue;
+        final t = (i['type'] as String?) ?? 'food';
+        final label = '${i['name'] ?? i['menu_item_name'] ?? 'Item'} x${i['quantity'] ?? 1}';
+        (t == 'bar' || t == 'drink' ? bar : kitchen).add(label);
+      }
+    }
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppColors.card,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          const Icon(Icons.check_circle_rounded, color: AppColors.success, size: 20),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(name,
+                  style: GoogleFonts.outfit(fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+              Text(
+                [
+                  if (phone != null && phone.isNotEmpty) phone,
+                  if (invoiceNo != null && invoiceNo.isNotEmpty) invoiceNo,
+                  if (when != null) DateFormat('dd MMM, hh:mm a').format(when),
+                ].join('  ·  '),
+                style: GoogleFonts.outfit(fontSize: 12, color: AppColors.textSecondary),
+              ),
+            ]),
+          ),
+          Text('NPR ${_money.format(total)}',
+              style: GoogleFonts.outfit(fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+        ]),
+        const SizedBox(height: 10),
+        if (kitchen.isNotEmpty) _stationRow('KITCHEN', kitchen, AppColors.primary),
+        if (bar.isNotEmpty) ...[
+          if (kitchen.isNotEmpty) const SizedBox(height: 6),
+          _stationRow('BAR', bar, const Color(0xFF8E44AD)),
+        ],
+        const SizedBox(height: 10),
+        Align(
+          alignment: Alignment.centerRight,
+          child: OutlinedButton.icon(
+            onPressed: onReprint,
+            icon: const Icon(Icons.print_rounded, size: 15),
+            label: const Text('Reprint tickets'),
+          ),
+        ),
+      ]),
+    );
+  }
+
+  Widget _stationRow(String station, List<String> items, Color color) {
+    return Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Container(
+        margin: const EdgeInsets.only(top: 1),
+        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.12),
+          borderRadius: BorderRadius.circular(6),
+        ),
+        child: Text(station,
+            style: GoogleFonts.outfit(
+                fontSize: 9.5, fontWeight: FontWeight.w800, color: color, letterSpacing: 0.5)),
+      ),
+      const SizedBox(width: 10),
+      Expanded(
+        child: Text(items.join(', '),
+            style: GoogleFonts.outfit(fontSize: 12.5, color: AppColors.textSecondary)),
+      ),
+    ]);
   }
 }
 
@@ -421,12 +641,15 @@ class _OnlineOrderBuilderState extends ConsumerState<_OnlineOrderBuilder> {
     for (final i in widget.existing?.items ?? const []) i['menuItemId'] as String: Map.from(i),
   };
   String? _catId;
+  final _search = TextEditingController();
+  String _query = '';
 
   @override
   void dispose() {
     _name.dispose();
     _phone.dispose();
     _address.dispose();
+    _search.dispose();
     super.dispose();
   }
 
@@ -517,7 +740,29 @@ class _OnlineOrderBuilderState extends ConsumerState<_OnlineOrderBuilder> {
             ),
             const SizedBox(height: 16),
 
-            // ── categories ──
+            // ── menu search (name · category · price) ──
+            TextField(
+              controller: _search,
+              onChanged: (v) => setState(() => _query = v.trim().toLowerCase()),
+              decoration: InputDecoration(
+                isDense: true,
+                hintText: 'Search menu by name, category or price…',
+                prefixIcon: const Icon(Icons.search_rounded, size: 20),
+                suffixIcon: _query.isEmpty
+                    ? null
+                    : IconButton(
+                        icon: const Icon(Icons.close_rounded, size: 18),
+                        onPressed: () => setState(() {
+                          _search.clear();
+                          _query = '';
+                        }),
+                      ),
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+              ),
+            ),
+            const SizedBox(height: 12),
+
+            // ── search results OR category browser ──
             catsAsync.when(
               loading: () => const Center(child: CircularProgressIndicator(color: AppColors.primary)),
               error: (e, _) => Text('Menu unavailable: $e',
@@ -526,6 +771,19 @@ class _OnlineOrderBuilderState extends ConsumerState<_OnlineOrderBuilder> {
                 if (cats.isEmpty) {
                   return Text('No menu items yet.',
                       style: GoogleFonts.outfit(color: AppColors.textHint));
+                }
+                // While searching, ignore categories and show a flat filtered
+                // list across the whole branch menu.
+                if (_query.isNotEmpty && branchId != null) {
+                  final catNameById = {for (final c in cats) c.id: c.name};
+                  return _SearchResults(
+                    branchId: branchId,
+                    query: _query,
+                    catNameById: catNameById,
+                    cart: _cart,
+                    onAdd: _add,
+                    onDec: _dec,
+                  );
                 }
                 _catId ??= cats.first.id;
                 return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -647,40 +905,138 @@ class _MenuGrid extends ConsumerWidget {
       error: (e, _) => Text('Items unavailable: $e',
           style: GoogleFonts.outfit(color: AppColors.textSecondary)),
       data: (items) => Column(
-        children: items.map((m) {
-          final qty = (cart[m.id]?['quantity'] as int?) ?? 0;
-          return Container(
-            margin: const EdgeInsets.only(bottom: 8),
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            decoration: BoxDecoration(
-              color: AppColors.card,
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: AppColors.border),
-            ),
-            child: Row(children: [
-              Expanded(
-                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text(m.name,
-                      style: GoogleFonts.outfit(
-                          fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
-                  Text('NPR ${_money.format(m.price)}',
-                      style: GoogleFonts.outfit(fontSize: 12, color: AppColors.primary)),
-                ]),
-              ),
-              if (qty > 0) ...[
-                IconButton(
-                    onPressed: () => onDec(m.id),
-                    icon: const Icon(Icons.remove_circle_outline_rounded, color: AppColors.error)),
-                Text('$qty',
-                    style: GoogleFonts.outfit(fontWeight: FontWeight.w700, fontSize: 15)),
-              ],
-              IconButton(
-                  onPressed: () => onAdd(m),
-                  icon: const Icon(Icons.add_circle_rounded, color: AppColors.primary)),
-            ]),
-          );
-        }).toList(),
+        children: items
+            .map((m) => _MenuItemTile(
+                  item: m,
+                  qty: (cart[m.id]?['quantity'] as int?) ?? 0,
+                  onAdd: () => onAdd(m),
+                  onDec: () => onDec(m.id),
+                ))
+            .toList(),
       ),
+    );
+  }
+}
+
+/// Flat, filtered results across the WHOLE branch menu — matches the query
+/// against item name, its category name, and its price. Powers the search bar.
+class _SearchResults extends ConsumerWidget {
+  final String branchId;
+  final String query;
+  final Map<String, String> catNameById;
+  final Map<String, Map<String, dynamic>> cart;
+  final void Function(MenuItem) onAdd;
+  final void Function(String) onDec;
+  const _SearchResults({
+    required this.branchId,
+    required this.query,
+    required this.catNameById,
+    required this.cart,
+    required this.onAdd,
+    required this.onDec,
+  });
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final itemsAsync = ref.watch(allMenuItemsProvider(branchId));
+    return itemsAsync.when(
+      loading: () => const Padding(
+          padding: EdgeInsets.all(16),
+          child: Center(child: CircularProgressIndicator(color: AppColors.primary))),
+      error: (e, _) => Text('Search unavailable: $e',
+          style: GoogleFonts.outfit(color: AppColors.textSecondary)),
+      data: (items) {
+        final q = query.toLowerCase();
+        final matches = items.where((m) {
+          final cat = (catNameById[m.categoryId] ?? '').toLowerCase();
+          return m.name.toLowerCase().contains(q) ||
+              cat.contains(q) ||
+              m.price.toStringAsFixed(0).contains(q) ||
+              _money.format(m.price).contains(q);
+        }).toList();
+
+        if (matches.isEmpty) {
+          return Padding(
+            padding: const EdgeInsets.symmetric(vertical: 24),
+            child: Center(
+              child: Text('No items match “$query”.',
+                  style: GoogleFonts.outfit(color: AppColors.textHint)),
+            ),
+          );
+        }
+        return Column(
+          children: matches
+              .map((m) => _MenuItemTile(
+                    item: m,
+                    qty: (cart[m.id]?['quantity'] as int?) ?? 0,
+                    subtitle: catNameById[m.categoryId],
+                    onAdd: () => onAdd(m),
+                    onDec: () => onDec(m.id),
+                  ))
+              .toList(),
+        );
+      },
+    );
+  }
+}
+
+/// One selectable menu row shared by the category grid and the search results.
+class _MenuItemTile extends StatelessWidget {
+  final MenuItem item;
+  final int qty;
+  final String? subtitle;
+  final VoidCallback onAdd;
+  final VoidCallback onDec;
+  const _MenuItemTile({
+    required this.item,
+    required this.qty,
+    required this.onAdd,
+    required this.onDec,
+    this.subtitle,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: AppColors.card,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(
+            color: qty > 0 ? AppColors.primary.withValues(alpha: 0.5) : AppColors.border),
+      ),
+      child: Row(children: [
+        Expanded(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(item.name,
+                style: GoogleFonts.outfit(
+                    fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+            Row(children: [
+              Text('NPR ${_money.format(item.price)}',
+                  style: GoogleFonts.outfit(fontSize: 12, color: AppColors.primary)),
+              if (subtitle != null && subtitle!.isNotEmpty) ...[
+                Text('  ·  ',
+                    style: GoogleFonts.outfit(fontSize: 12, color: AppColors.textHint)),
+                Flexible(
+                  child: Text(subtitle!,
+                      overflow: TextOverflow.ellipsis,
+                      style: GoogleFonts.outfit(fontSize: 12, color: AppColors.textHint)),
+                ),
+              ],
+            ]),
+          ]),
+        ),
+        if (qty > 0) ...[
+          IconButton(
+              onPressed: onDec,
+              icon: const Icon(Icons.remove_circle_outline_rounded, color: AppColors.error)),
+          Text('$qty', style: GoogleFonts.outfit(fontWeight: FontWeight.w700, fontSize: 15)),
+        ],
+        IconButton(
+            onPressed: onAdd,
+            icon: const Icon(Icons.add_circle_rounded, color: AppColors.primary)),
+      ]),
     );
   }
 }
@@ -709,8 +1065,33 @@ const _onlinePayMethods = <(String, String)>[
 class _SettleOnlineSheetState extends ConsumerState<_SettleOnlineSheet> {
   String _method = 'cash';
   bool _busy = false;
+  final _discountCtrl = TextEditingController(text: '0');
+  double _discount = 0;
+  bool _applyServiceCharge = false;
 
-  double get _total => (widget.order['total_amount'] as num?)?.toDouble() ?? 0;
+  @override
+  void dispose() {
+    _discountCtrl.dispose();
+    super.dispose();
+  }
+
+  double get _subtotal => (widget.order['total_amount'] as num?)?.toDouble() ?? 0;
+
+  double get _serviceRate =>
+      ((ref.read(currentBranchProvider).valueOrNull?['service_charge_rate']) as num?)?.toDouble() ?? 10;
+
+  double get _serviceCharge => _applyServiceCharge ? _subtotal * _serviceRate / 100 : 0;
+
+  /// Payable after service charge + discount (never below zero).
+  double get _net {
+    final n = _subtotal + _serviceCharge - _discount;
+    return n < 0 ? 0 : n;
+  }
+
+  String? get _phone {
+    final p = widget.order['customer_phone'] as String?;
+    return (p != null && p.isNotEmpty) ? p : null;
+  }
 
   /// The order's line items, flattened for the bill/receipt payload.
   Future<List<Map<String, dynamic>>> _fetchItems() async {
@@ -727,16 +1108,15 @@ class _SettleOnlineSheetState extends ConsumerState<_SettleOnlineSheet> {
     setState(() => _busy = true);
     try {
       final items = await _fetchItems();
-      final total = _total > 0
-          ? _total
-          : items.fold(0.0,
-              (s, i) => s + ((i['unit_price'] as num?)?.toDouble() ?? 0) * (i['quantity'] as int));
       if (mounted) {
         await printBillNow(context, ref, bill: {
           'session_number': widget.order['session_number'],
           'customer_name': widget.order['customer_name'],
-          'sub_total': total,
-          'total_amount': total,
+          if (_phone != null) 'customer_phone': _phone,
+          'sub_total': _subtotal,
+          'discount': _discount,
+          'service_charge': _serviceCharge,
+          'total_amount': _net,
         }, items: items);
       }
     } catch (e) {
@@ -753,25 +1133,32 @@ class _SettleOnlineSheetState extends ConsumerState<_SettleOnlineSheet> {
   /// invoice number, records the payment, then prints the tax invoice.
   Future<void> _settle() async {
     final messenger = ScaffoldMessenger.of(context);
-    final total = _total;
     setState(() => _busy = true);
     try {
       final res = await ApiClient.instance.post(
         ApiConstants.generateBill(widget.order['id'] as String),
         data: {
           'paymentMethod': _method,
-          'amountPaid': total,
+          // No amountPaid: this is always a full settle, so let the server's
+          // own total be recorded as paid (avoids a client-total rounding
+          // shortfall being mis-flagged "partial paid"). discount +
+          // applyServiceCharge are sent so the server computes the same total.
+          'discount': _discount,
+          'applyServiceCharge': _applyServiceCharge,
           if (widget.order['customer_name'] != null) 'customerName': widget.order['customer_name'],
-          if (widget.order['customer_phone'] != null) 'customerPhone': widget.order['customer_phone'],
+          if (_phone != null) 'customerPhone': _phone,
         },
       );
       final bill = res.data as Map<String, dynamic>;
       // Print the invoice on the receipt printer (it reads the branch itself).
+      // Carry the phone through in case the bill record didn't echo it back.
       final items = await _fetchItems();
       if (mounted) {
-        await printBillNow(context, ref, bill: bill, items: items);
+        await printBillNow(context, ref,
+            bill: {if (_phone != null) 'customer_phone': _phone, ...bill}, items: items);
       }
       ref.invalidate(onlineOrdersProvider);
+      ref.invalidate(onlineOrderHistoryProvider);
       if (mounted) {
         Navigator.pop(context);
         messenger.showSnackBar(const SnackBar(
@@ -804,19 +1191,102 @@ class _SettleOnlineSheetState extends ConsumerState<_SettleOnlineSheet> {
     return out;
   }
 
+  Widget _line(String label, double amount, {bool bold = false, Color? color}) {
+    final style = GoogleFonts.outfit(
+      fontSize: bold ? 15 : 12.5,
+      fontWeight: bold ? FontWeight.w800 : FontWeight.w500,
+      color: color ?? (bold ? AppColors.textPrimary : AppColors.textSecondary),
+    );
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+        Text(label, style: style),
+        Text('${amount < 0 ? '-' : ''}NPR ${_money.format(amount.abs())}', style: style),
+      ]),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    final total = _total;
+    // Watch the branch so the service-charge rate/amount appears once loaded.
+    ref.watch(currentBranchProvider);
+    final net = _net;
     return SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.all(20),
+      child: SingleChildScrollView(
+        padding: EdgeInsets.fromLTRB(20, 20, 20, 20 + MediaQuery.of(context).viewInsets.bottom),
         child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text('Settle Online Order',
               style: GoogleFonts.outfit(fontSize: 17, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
           const SizedBox(height: 4),
-          Text('${widget.order['customer_name'] ?? ''}  ·  NPR ${_money.format(total)}',
+          Text([
+            if ((widget.order['customer_name'] as String?)?.isNotEmpty ?? false)
+              widget.order['customer_name'],
+            if (_phone != null) _phone,
+          ].whereType<String>().join('  ·  '),
               style: GoogleFonts.outfit(fontSize: 13, color: AppColors.textSecondary)),
           const SizedBox(height: 18),
+
+          // ── Adjustments: service charge + discount ──
+          Row(children: [
+            Expanded(
+              child: Text('Service Charge (${_serviceRate.toStringAsFixed(0)}%)',
+                  style: GoogleFonts.outfit(
+                      fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+            ),
+            Text(_applyServiceCharge ? '+ NPR ${_money.format(_serviceCharge)}' : 'Off',
+                style: GoogleFonts.outfit(
+                    fontSize: 12,
+                    color: _applyServiceCharge ? AppColors.warning : AppColors.textHint)),
+            Switch(
+              value: _applyServiceCharge,
+              activeThumbColor: AppColors.primary,
+              onChanged: _busy ? null : (v) => setState(() => _applyServiceCharge = v),
+            ),
+          ]),
+          const SizedBox(height: 4),
+          Row(children: [
+            Expanded(
+              child: Text('Discount (NPR)',
+                  style: GoogleFonts.outfit(
+                      fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+            ),
+            SizedBox(
+              width: 120,
+              child: TextField(
+                controller: _discountCtrl,
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                textAlign: TextAlign.right,
+                enabled: !_busy,
+                style: GoogleFonts.outfit(fontWeight: FontWeight.w600, color: AppColors.success),
+                decoration: InputDecoration(
+                  isDense: true,
+                  prefixText: 'NPR ',
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                ),
+                onChanged: (v) => setState(() => _discount = double.tryParse(v) ?? 0),
+              ),
+            ),
+          ]),
+          const SizedBox(height: 12),
+          // ── Live total breakdown ──
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: AppColors.background,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: AppColors.border),
+            ),
+            child: Column(children: [
+              _line('Subtotal', _subtotal),
+              if (_serviceCharge > 0) _line('Service charge', _serviceCharge),
+              if (_discount > 0) _line('Discount', -_discount, color: AppColors.success),
+              const Divider(height: 14),
+              _line('Payable', net, bold: true),
+            ]),
+          ),
+          const SizedBox(height: 18),
+
           Text('PAYMENT METHOD',
               style: GoogleFonts.outfit(
                   fontSize: 11, fontWeight: FontWeight.w700, color: AppColors.textHint, letterSpacing: 0.8)),
@@ -869,7 +1339,7 @@ class _SettleOnlineSheetState extends ConsumerState<_SettleOnlineSheet> {
                 const SizedBox(width: 8),
                 Flexible(
                   child: Text(
-                    _busy ? 'Working…' : 'Settle & Print Invoice · NPR ${_money.format(total)}',
+                    _busy ? 'Working…' : 'Settle & Print Invoice · NPR ${_money.format(net)}',
                     overflow: TextOverflow.ellipsis,
                   ),
                 ),

@@ -328,6 +328,7 @@ class _IoThermalPrinter implements ThermalPrinter {
     final session = _f(bill, 'sessionNumber', 'session_number');
     final cashier = _f(bill, 'cashierName', 'cashier_name');
     final customer = _f(bill, 'customerName', 'customer_name');
+    final customerPhone = _f(bill, 'customerPhone', 'customer_phone');
     final method = _f(bill, 'paymentMethod', 'payment_method').toUpperCase();
 
     final createdRaw = bill['createdAt'] ?? bill['created_at'];
@@ -364,6 +365,7 @@ class _IoThermalPrinter implements ThermalPrinter {
     b += g.text('Date      : ${formatDateTime(when)}');
     if (cashier.isNotEmpty) b += g.text('Cashier   : $cashier');
     if (customer.isNotEmpty) b += g.text('Customer  : $customer');
+    if (customerPhone.isNotEmpty) b += g.text('Contact   : $customerPhone');
     b += g.hr();
 
     for (final item in items) {

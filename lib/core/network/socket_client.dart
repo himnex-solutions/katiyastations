@@ -77,7 +77,13 @@ class SocketClient {
   io.Socket? _socket;
   final _eventControllers = <String, StreamController<dynamic>>{};
   bool _isConnected = false;
+  bool _hasConnectedOnce = false;
   String? _currentBranchId;
+
+  // Synthetic local event fired after a RE-connect (not the first connect), so
+  // listeners can re-fetch anything that changed while the socket was down —
+  // events emitted during the outage are never replayed by socket.io.
+  static const String reconnected = '__client_reconnected__';
 
   // ── Public state ───────────────────────────────────────────
   bool get isConnected => _isConnected;
@@ -110,6 +116,15 @@ class SocketClient {
       if (_currentBranchId != null) {
         joinBranchRoom(_currentBranchId!);
       }
+
+      // On a RE-connect, tell listeners to catch up: any kot:new / bill / status
+      // events emitted while we were offline are gone for good, so screens must
+      // re-fetch rather than wait for a live event that will never arrive. Skip
+      // the very first connect — the initial load already has fresh data.
+      if (_hasConnectedOnce) {
+        _emit(reconnected, null);
+      }
+      _hasConnectedOnce = true;
     });
 
     _socket!.onDisconnect((_) {
@@ -217,6 +232,10 @@ class SocketClient {
 
   Stream<Map<String, dynamic>> onShiftApproved() =>
       on(SocketEvents.shiftApproved).map((d) => d as Map<String, dynamic>);
+
+  /// Fires after the socket RE-connects (see [reconnected]) — listeners should
+  /// re-fetch live data to catch up on anything missed during the outage.
+  Stream<void> onReconnected() => on(reconnected);
 
   // ── Emit (send event to server) ────────────────────────────
   void emit(String event, [dynamic data]) {

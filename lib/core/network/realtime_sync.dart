@@ -25,6 +25,7 @@ import '../../features/credit/presentation/screens/credit_screen.dart';
 import '../../features/notifications/presentation/screens/notifications_screen.dart';
 import '../../features/inventory/presentation/screens/inventory_screen.dart';
 import '../../features/cashier/presentation/screens/cashier_screen.dart';
+import '../../features/cashier/presentation/screens/online_orders_screen.dart';
 import '../../features/users/presentation/screens/users_screen.dart';
 import '../../features/purchase/presentation/screens/purchase_screen.dart';
 import '../../features/menu/presentation/screens/menu_management_screen.dart';
@@ -43,6 +44,14 @@ final realtimeSyncProvider = Provider<void>((ref) {
   final subscriptions = <StreamSubscription<dynamic>>[];
   final socket = SocketClient.instance;
 
+  // Online call-in/delivery orders live on the cashier's Online Orders screen;
+  // keep its active list + history fresh on the same events dine-in uses so a
+  // new order, a KOT change, or a settle shows up live on every till.
+  void invalidateOnlineOrders() {
+    ref.invalidate(onlineOrdersProvider);
+    ref.invalidate(onlineOrderHistoryProvider);
+  }
+
   void invalidateKots() {
     ref.invalidate(kitchenKotsProvider);
     ref.invalidate(sessionKotsProvider);
@@ -50,6 +59,7 @@ final realtimeSyncProvider = Provider<void>((ref) {
     ref.invalidate(dashboardKotsProvider);
     ref.invalidate(activeSessionsStreamProvider);
     ref.invalidate(dashboardSessionsProvider);
+    invalidateOnlineOrders();
   }
 
   void invalidateTablesAndSessions() {
@@ -58,6 +68,7 @@ final realtimeSyncProvider = Provider<void>((ref) {
     ref.invalidate(tableSessionProvider);
     ref.invalidate(dashboardSessionsProvider);
     ref.invalidate(sessionBillingProvider);
+    invalidateOnlineOrders();
   }
 
   void invalidateBilling() {
@@ -140,6 +151,16 @@ final realtimeSyncProvider = Provider<void>((ref) {
       invalidateBilling();
       ref.invalidate(inventoryProvider);
       ref.invalidate(barStockProvider);
+    }),
+    // Caught up after a dropped connection: socket.io does NOT replay events
+    // emitted while we were offline, so a KOT sent, a bill settled, or a status
+    // change during the gap would otherwise be missed. Re-fetch every live
+    // surface so the cashier's billing (and kitchen/tables) can never sit stale.
+    socket.onReconnected().listen((_) {
+      invalidateKots();
+      invalidateBilling(); // → tables, sessions, online orders too
+      invalidateMenu();
+      ref.invalidate(notificationsProvider);
     }),
     socket.onNotification().listen((_) => ref.invalidate(notificationsProvider)),
     socket.onLowStock().listen((data) {

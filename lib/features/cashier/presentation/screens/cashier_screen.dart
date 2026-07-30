@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'dart:async';
 import 'dart:convert';
 import 'package:intl/intl.dart';
 import '../../../../core/constants/app_colors.dart';
@@ -173,6 +174,15 @@ class _CashierScreenState extends ConsumerState<CashierScreen>
     },
   ];
 
+  // Safety-net poll for the open session's orders. The socket pushes new KOTs
+  // live (instant), but a single event dropped during a blip would leave the
+  // bill missing an item until a manual reselect — so re-pull the selected
+  // session's KOTs on a tight interval too. Cheap (one GET), and
+  // skipLoadingOnReload keeps it from flickering. This is what guarantees a
+  // sent item ALWAYS reaches billing, within ~2s at worst.
+  static const _billingPollInterval = Duration(seconds: 2);
+  Timer? _billingPoll;
+
   @override
   void initState() {
     super.initState();
@@ -182,6 +192,15 @@ class _CashierScreenState extends ConsumerState<CashierScreen>
       vsync: this,
       duration: const Duration(milliseconds: 800),
     )..repeat(reverse: true);
+    _billingPoll = Timer.periodic(_billingPollInterval, (_) => _refreshOpenSession());
+  }
+
+  void _refreshOpenSession() {
+    if (!mounted || _processing) return;
+    final sid = _selectedSessionId;
+    if (sid == null || sid.isEmpty) return;
+    // Invalidating the KOT source re-runs sessionBillingProvider (it watches it).
+    ref.invalidate(sessionKotsProvider(sid));
   }
 
   @override
@@ -204,6 +223,7 @@ class _CashierScreenState extends ConsumerState<CashierScreen>
 
   @override
   void dispose() {
+    _billingPoll?.cancel();
     _amountCtrl.dispose();
     _discountCtrl.dispose();
     _tableSearchCtrl.dispose();
@@ -224,6 +244,9 @@ class _CashierScreenState extends ConsumerState<CashierScreen>
         _selectedSessionId == null || _selectedSessionId!.isEmpty
             ? _noSessionView(context, isMobile: isMobile)
             : ref.watch(sessionBillingProvider(_selectedSessionId!)).when(
+                  // Keep showing the current bill while a background refresh
+                  // (the 6s poll or a socket event) re-pulls — no spinner flash.
+                  skipLoadingOnReload: true,
                   loading: () => const Center(
                     child: CircularProgressIndicator(color: AppColors.primary),
                   ),
@@ -949,9 +972,16 @@ class _CashierScreenState extends ConsumerState<CashierScreen>
       {bool isMobile = false}) {
     final items = data['items'] as List<Map<String, dynamic>>;
     final subtotal = data['subtotal'] as double;
-    final serviceCharge = _applyServiceCharge ? subtotal * 0.1 : 0.0;
+    // Use the branch's real service-charge / VAT rates (not hardcoded 10/13%)
+    // so the total the cashier sees and collects matches what the server
+    // charges — otherwise a non-10% branch could under-collect and the settle
+    // would read "partial paid". Falls back to the common 10/13% defaults.
+    final branch = ref.watch(currentBranchProvider).valueOrNull;
+    final svcRate = (branch?['service_charge_rate'] as num?)?.toDouble() ?? 10.0;
+    final vatRate = (branch?['vat_rate'] as num?)?.toDouble() ?? 13.0;
+    final serviceCharge = _applyServiceCharge ? subtotal * svcRate / 100 : 0.0;
     final afterService = subtotal + serviceCharge - _discount;
-    final vat = _applyVat ? afterService * 0.13 : 0.0;
+    final vat = _applyVat ? afterService * vatRate / 100 : 0.0;
     final total = afterService + vat;
     final amountPaid = double.tryParse(_amountCtrl.text) ?? 0;
     final change = amountPaid - total;
@@ -2842,16 +2872,20 @@ class _CashierScreenState extends ConsumerState<CashierScreen>
     }
     setState(() => _processing = true);
     try {
-      final amountPaid = _paymentMethod == 'cash'
-          ? (double.tryParse(_amountCtrl.text) ?? total)
-          : total;
+      // Only send amountPaid for a cash tender the cashier actually keyed (it
+      // drives the change calc, and may be an intentional partial). For every
+      // other case OMIT it, so the server records its own authoritative total
+      // as paid — never a client total that could be a few rupees short and get
+      // mis-flagged "partial paid".
+      final cashTendered =
+          _paymentMethod == 'cash' ? double.tryParse(_amountCtrl.text.trim()) : null;
 
       final response = await ApiClient.instance.post(
         ApiConstants.generateBill(_selectedSessionId!),
         data: {
           'discount': _discount,
           'paymentMethod': _paymentMethod,
-          'amountPaid': amountPaid,
+          if (cashTendered != null) 'amountPaid': cashTendered,
           if (_customerName != null) 'customerName': _customerName,
           if (_customerPhone != null) 'customerPhone': _customerPhone,
           'applyServiceCharge': _applyServiceCharge,

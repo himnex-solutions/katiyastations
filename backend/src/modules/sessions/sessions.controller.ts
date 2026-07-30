@@ -27,6 +27,17 @@ export class SessionsController {
     return this.sessionsService.findOnlineOrders(user, branchId);
   }
 
+  // Settled online orders — the cashier's history of past call-in/delivery
+  // sales, with each KOT's items so they can see what went to kitchen vs bar.
+  @Get('online/history')
+  onlineHistory(
+    @CurrentUser() user: CurrentUserPayload,
+    @Query('branchId') branchId?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.sessionsService.findOnlineOrderHistory(user, branchId, limit ? Number(limit) : undefined);
+  }
+
   @Post('online')
   createOnline(@CurrentUser() user: CurrentUserPayload, @Body() dto: CreateOnlineOrderDto) {
     return this.sessionsService.createOnlineOrder(user, dto);
