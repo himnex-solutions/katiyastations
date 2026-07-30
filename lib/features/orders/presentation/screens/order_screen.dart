@@ -37,6 +37,10 @@ class _OrderScreenState extends ConsumerState<OrderScreen>
   late final TabController _rightPanelTab;
   final _searchCtrl = TextEditingController();
   String _searchQuery = '';
+  // Free-text note for the whole order, attached to the next KOT sent and
+  // printed on the kitchen/bar ticket. Kept on the screen (not the cart) so it
+  // survives switching tabs, and cleared once the KOT goes out.
+  final _kotNoteCtrl = TextEditingController();
 
   @override
   void initState() {
@@ -48,6 +52,7 @@ class _OrderScreenState extends ConsumerState<OrderScreen>
   void dispose() {
     _rightPanelTab.dispose();
     _searchCtrl.dispose();
+    _kotNoteCtrl.dispose();
     super.dispose();
   }
 
@@ -584,6 +589,7 @@ class _OrderScreenState extends ConsumerState<OrderScreen>
                       subtotal: subtotal,
                       tax: tax,
                       total: total,
+                      noteController: _kotNoteCtrl,
                       onSendKot: () => _sendKot(profile),
                     ),
                     // ── KOT History Tab ───────────────────────────────
@@ -717,6 +723,8 @@ class _OrderScreenState extends ConsumerState<OrderScreen>
                 ),
                 child: Column(
                   children: [
+                    _KotNoteField(controller: _kotNoteCtrl),
+                    const SizedBox(height: 12),
                     _SummaryRow('Subtotal', 'NPR ${fmt.format(subtotal)}'),
                     const Divider(height: 16),
                     _SummaryRow('Total', 'NPR ${fmt.format(total)}',
@@ -892,14 +900,17 @@ class _OrderScreenState extends ConsumerState<OrderScreen>
   Future<void> _sendKot(dynamic profile) async {
     if (profile == null) return;
     final messenger = ScaffoldMessenger.of(context);
+    final note = _kotNoteCtrl.text.trim();
     try {
       final kot = await ref.read(orderNotifierProvider.notifier).sendKot(
             sessionId: widget.sessionId,
             tableId: widget.tableId,
             branchId: profile.branchId ?? '',
+            notes: note.isEmpty ? null : note,
           );
       if (kot != null && mounted) {
         messenger.showSuccess('${kot.kotNumber} sent to kitchen!');
+        _kotNoteCtrl.clear();
         // Switch to KOT History tab so they can see/edit it
         _rightPanelTab.animateTo(1);
 
@@ -936,6 +947,7 @@ class _CartTab extends StatelessWidget {
   final double subtotal;
   final double tax;
   final double total;
+  final TextEditingController noteController;
   final VoidCallback onSendKot;
 
   const _CartTab({
@@ -945,6 +957,7 @@ class _CartTab extends StatelessWidget {
     required this.subtotal,
     required this.tax,
     required this.total,
+    required this.noteController,
     required this.onSendKot,
   });
 
@@ -1000,6 +1013,8 @@ class _CartTab extends StatelessWidget {
           decoration: const BoxDecoration(border: Border(top: BorderSide(color: AppColors.border))),
           child: Column(
             children: [
+              _KotNoteField(controller: noteController),
+              const SizedBox(height: 12),
               _SummaryRow('Subtotal', 'NPR ${fmt.format(subtotal)}'),
               const Divider(height: 16),
               _SummaryRow('Total', 'NPR ${fmt.format(total)}', isBold: true),
@@ -1058,15 +1073,71 @@ class _KotHistoryTab extends ConsumerWidget {
             ),
           );
         }
-        return ListView.builder(
-          padding: const EdgeInsets.all(12),
-          itemCount: kots.length,
-          itemBuilder: (ctx, i) {
-            final kot = kots[i];
-            return _KotHistoryCard(kot: kot, fmt: fmt)
-                .animate()
-                .fadeIn(delay: Duration(milliseconds: i * 50));
-          },
+        // Grand total for the whole table: every non-cancelled item across
+        // every KOT (server + offline). This is what the waiter reads out to the
+        // guest. It's derived from sessionKotsProvider, which the realtime layer
+        // re-pulls on reconnect, so it self-corrects within seconds of internet
+        // returning — and works purely from the local Isar copy while offline.
+        final tableTotal = kots.fold<double>(0, (sum, kot) {
+          final live = kot.items.where((i) => i['status'] != 'cancelled');
+          return sum +
+              live.fold<double>(
+                0,
+                (s, i) =>
+                    s +
+                    ((i['quantity'] as num).toDouble() *
+                        ((i['unit_price'] as num?)?.toDouble() ?? 0.0)),
+              );
+        });
+        final liveKots = kots.where((k) => k.status != 'cancelled').length;
+
+        return Column(
+          children: [
+            Expanded(
+              child: ListView.builder(
+                padding: const EdgeInsets.all(12),
+                itemCount: kots.length,
+                itemBuilder: (ctx, i) {
+                  final kot = kots[i];
+                  return _KotHistoryCard(kot: kot, fmt: fmt)
+                      .animate()
+                      .fadeIn(delay: Duration(milliseconds: i * 50));
+                },
+              ),
+            ),
+            // Persistent grand-total footer so it stays visible while scrolling.
+            Container(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 14),
+              decoration: const BoxDecoration(
+                color: AppColors.surface,
+                border: Border(top: BorderSide(color: AppColors.border)),
+              ),
+              child: Row(
+                children: [
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('TABLE TOTAL',
+                          style: GoogleFonts.outfit(
+                              fontSize: 10.5,
+                              fontWeight: FontWeight.w700,
+                              letterSpacing: 0.5,
+                              color: AppColors.textHint)),
+                      Text('$liveKots order${liveKots == 1 ? '' : 's'} so far',
+                          style: GoogleFonts.outfit(
+                              fontSize: 11, color: AppColors.textSecondary)),
+                    ],
+                  ),
+                  const Spacer(),
+                  Text('NPR ${fmt.format(tableTotal)}',
+                      style: GoogleFonts.outfit(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w800,
+                          color: AppColors.primary)),
+                ],
+              ),
+            ),
+          ],
         );
       },
     );
@@ -1623,6 +1694,44 @@ class _CartItemTile extends StatelessWidget {
             ],
           ),
         ],
+      ),
+    );
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// KOT Note Field — a free-text note for the whole order, printed on the
+// kitchen/bar ticket. Shared by the desktop cart panel and the mobile sheet.
+// ════════════════════════════════════════════════════════════════════════════
+class _KotNoteField extends StatelessWidget {
+  final TextEditingController controller;
+  const _KotNoteField({required this.controller});
+
+  @override
+  Widget build(BuildContext context) {
+    return TextField(
+      controller: controller,
+      minLines: 1,
+      maxLines: 3,
+      textInputAction: TextInputAction.newline,
+      style: GoogleFonts.outfit(fontSize: 13, color: AppColors.textPrimary),
+      decoration: InputDecoration(
+        isDense: true,
+        hintText: 'Order note for kitchen (e.g. no onions, serve together)',
+        hintStyle: GoogleFonts.outfit(fontSize: 12, color: AppColors.textHint),
+        prefixIcon: const Icon(Icons.sticky_note_2_outlined,
+            size: 18, color: AppColors.textSecondary),
+        filled: true,
+        fillColor: AppColors.surfaceVariant,
+        contentPadding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
+        border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
+        enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(10),
+          borderSide: const BorderSide(color: AppColors.primary, width: 1.4),
+        ),
       ),
     );
   }

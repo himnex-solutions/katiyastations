@@ -334,6 +334,7 @@ class OrderNotifier extends StateNotifier<List<CartItem>> {
             'id': kotId,
             'sessionId': sessionId,
             if (waiterId != null) 'waiterId': waiterId,
+            if (notes != null && notes.trim().isNotEmpty) 'notes': notes.trim(),
             'items': itemsPayload,
           },
         );
@@ -433,6 +434,7 @@ class OrderNotifier extends StateNotifier<List<CartItem>> {
         'id': kotId,
         'sessionId': sessionId,
         if (waiterId != null) 'waiterId': waiterId,
+        if (notes != null && notes.trim().isNotEmpty) 'notes': notes.trim(),
         'items': itemsPayload,
       },
     );

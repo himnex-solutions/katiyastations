@@ -48,7 +48,7 @@ export class BillingController {
     return this.billingService.addPayment(id, user, dto);
   }
 
-  @Roles('branch_manager', 'accountant')
+  @Roles('branch_manager', 'accountant', 'cashier')
   @Post('bills/:id/refund')
   refund(
     @Param('id') id: string,

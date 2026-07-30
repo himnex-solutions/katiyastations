@@ -2544,79 +2544,132 @@ class _CashierScreenState extends ConsumerState<CashierScreen>
     );
   }
 
+  /// One sent KOT, broken out so EACH item is its own cancellable row — even
+  /// when the waiter fired several items in a single order. The header still
+  /// carries a "Void all" action to drop the whole ticket in one tap.
   Widget _sentOrderRow(KotWithItems kot) {
     final liveItems =
         kot.items.where((i) => i['status'] != 'cancelled').toList();
+    if (liveItems.isEmpty) return const SizedBox.shrink();
     final itemCount = liveItems.fold<int>(
         0, (sum, i) => sum + ((i['quantity'] as num?)?.toInt() ?? 0));
-    final names = liveItems
-        .map((i) => (i['menu_item_name'] ?? i['name'] ?? 'Item') as String)
-        .join(', ');
+
+    return Container(
+      decoration: const BoxDecoration(
+        border: Border(top: BorderSide(color: AppColors.divider)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Header — KOT number + total item count + whole-ticket void.
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 8, 4),
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(7),
+                  decoration: BoxDecoration(
+                    color: AppColors.primary.withValues(alpha: 0.08),
+                    borderRadius: BorderRadius.circular(9),
+                  ),
+                  child: const Icon(Icons.receipt_long_rounded,
+                      size: 15, color: AppColors.primary),
+                ),
+                const SizedBox(width: 10),
+                Text(
+                  kot.kotNumber,
+                  style: GoogleFonts.outfit(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.textPrimary),
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  '$itemCount item${itemCount == 1 ? '' : 's'}',
+                  style: GoogleFonts.outfit(
+                      fontSize: 11, color: AppColors.textHint),
+                ),
+                const Spacer(),
+                TextButton.icon(
+                  icon: const Icon(Icons.delete_sweep_outlined, size: 15),
+                  label: const Text('Void all'),
+                  style: TextButton.styleFrom(
+                    foregroundColor: AppColors.error,
+                    textStyle: GoogleFonts.outfit(
+                        fontSize: 11.5, fontWeight: FontWeight.w600),
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    minimumSize: const Size(0, 32),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                  onPressed: _processing ? null : () => _cancelOrder(kot),
+                ),
+              ],
+            ),
+          ),
+          // Each live item — its own row + its own cancel.
+          ...liveItems.map((item) => _sentItemRow(kot, item)),
+          const SizedBox(height: 8),
+        ],
+      ),
+    );
+  }
+
+  Widget _sentItemRow(KotWithItems kot, Map<String, dynamic> item) {
+    final name = (item['menu_item_name'] ?? item['name'] ?? 'Item') as String;
+    final qty = (item['quantity'] as num?)?.toInt() ?? 1;
+    final unitPrice = (item['unit_price'] as num?)?.toDouble() ?? 0.0;
+    final note = (item['note'] ?? item['notes']) as String?;
 
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      padding: const EdgeInsets.fromLTRB(20, 4, 8, 4),
       child: Row(
         children: [
-          Container(
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-              color: AppColors.primary.withValues(alpha: 0.08),
-              borderRadius: BorderRadius.circular(9),
+          SizedBox(
+            width: 30,
+            child: Text(
+              '${qty}x',
+              style: GoogleFonts.outfit(
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w700,
+                  color: AppColors.textSecondary),
             ),
-            child: const Icon(Icons.receipt_long_rounded,
-                size: 16, color: AppColors.primary),
           ),
-          const SizedBox(width: 12),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Row(
-                  children: [
-                    Text(
-                      kot.kotNumber,
-                      style: GoogleFonts.outfit(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w700,
-                          color: AppColors.textPrimary),
-                    ),
-                    const SizedBox(width: 8),
-                    Text(
-                      '$itemCount item${itemCount == 1 ? '' : 's'}',
-                      style: GoogleFonts.outfit(
-                          fontSize: 11, color: AppColors.textHint),
-                    ),
-                  ],
+                Text(
+                  name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: GoogleFonts.outfit(
+                      fontSize: 12.5, color: AppColors.textPrimary),
                 ),
-                if (names.isNotEmpty)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 2),
-                    child: Text(
-                      names,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: GoogleFonts.outfit(
-                          fontSize: 11.5, color: AppColors.textSecondary),
-                    ),
+                if (note != null && note.trim().isNotEmpty)
+                  Text(
+                    note.trim(),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: GoogleFonts.outfit(
+                        fontSize: 10.5,
+                        fontStyle: FontStyle.italic,
+                        color: AppColors.textHint),
                   ),
               ],
             ),
           ),
-          const SizedBox(width: 10),
-          OutlinedButton.icon(
-            icon: const Icon(Icons.cancel_outlined, size: 15),
-            label: const Text('Cancel'),
-            style: OutlinedButton.styleFrom(
-              foregroundColor: AppColors.error,
-              side: BorderSide(color: AppColors.error.withValues(alpha: 0.4)),
-              textStyle:
-                  GoogleFonts.outfit(fontSize: 12, fontWeight: FontWeight.w600),
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8)),
-            ),
-            onPressed: _processing ? null : () => _cancelOrder(kot),
+          const SizedBox(width: 8),
+          Text(
+            'NPR ${fmt.format(qty * unitPrice)}',
+            style: GoogleFonts.outfit(
+                fontSize: 12, color: AppColors.textSecondary),
+          ),
+          IconButton(
+            icon: const Icon(Icons.cancel_outlined, size: 17),
+            color: AppColors.error,
+            visualDensity: VisualDensity.compact,
+            tooltip: 'Cancel this item',
+            onPressed: _processing ? null : () => _cancelOrderItem(kot, item),
           ),
         ],
       ),
@@ -2651,7 +2704,7 @@ class _CashierScreenState extends ConsumerState<CashierScreen>
   /// Either way the kitchen/bar gets a printed CANCELLED slip (LAN/USB — works
   /// with no internet).
   Future<void> _cancelOrder(KotWithItems kot) async {
-    final reason = await _showCancelReasonDialog(kot);
+    final reason = await _showCancelReasonDialog('Cancel ${kot.kotNumber}?');
     if (reason == null || reason.trim().isEmpty) return;
     final trimmed = reason.trim();
 
@@ -2719,6 +2772,140 @@ class _CashierScreenState extends ConsumerState<CashierScreen>
     }
   }
 
+  /// Cancels a SINGLE line off a sent order, leaving the rest of the ticket
+  /// intact. Same offline-first guarantees as a whole-KOT cancel:
+  ///  • An item on an order taken offline that hasn't synced yet is dropped
+  ///    straight from the queued "create" payload (and the local copy) — instant.
+  ///  • An item on a server-side order is cancelled through the item-status API
+  ///    when online, or queued to replay when offline.
+  /// A CANCELLED slip for just that item is printed to its station (LAN/USB).
+  Future<void> _cancelOrderItem(
+      KotWithItems kot, Map<String, dynamic> item) async {
+    final name = (item['menu_item_name'] ?? item['name'] ?? 'Item') as String;
+    final reason = await _showCancelReasonDialog('Cancel "$name"?');
+    if (reason == null || reason.trim().isEmpty) return;
+    final trimmed = reason.trim();
+    final itemId = item['id'] as String?;
+
+    setState(() => _processing = true);
+    try {
+      final voidedLocally = await _voidOfflineKotItem(kot, item);
+      if (!voidedLocally && itemId != null) {
+        final endpoint = ApiConstants.updateKotItemStatus(kot.id, itemId);
+        if (ref.read(connectivityProvider)) {
+          await ApiClient.instance.patch(
+            endpoint,
+            data: {'status': 'cancelled', 'reason': trimmed},
+          );
+        } else {
+          // Server-side item, but we're offline — queue the single-item cancel
+          // to replay when the connection returns.
+          await OfflineStore.instance.enqueue(
+            entityType: 'kot_item_cancel',
+            operation: 'cancel',
+            endpoint: endpoint,
+            method: 'PATCH',
+            payload: {'status': 'cancelled', 'reason': trimmed},
+          );
+        }
+      }
+
+      // CANCELLED slip for just this line, routed to its own station.
+      final profile = ref.read(authNotifierProvider).value;
+      final table = ref
+          .read(tablesStreamProvider)
+          .value
+          ?.where((t) => t.id == _selectedTableId)
+          .firstOrNull;
+      await printCancellationTickets(
+        ref,
+        kotNumber: kot.kotNumber,
+        tableNumber: table?.tableNumber ?? '',
+        reason: trimmed,
+        items: [Map<String, dynamic>.from(item)],
+        cancelledBy: profile?.fullName,
+      );
+
+      ref.invalidate(sessionKotsProvider(_selectedSessionId!));
+      ref.invalidate(sessionBillingProvider(_selectedSessionId!));
+      ref.invalidate(tablesStreamProvider);
+      if (_selectedTableId != null) {
+        ref.invalidate(tableSessionProvider(_selectedTableId!));
+      }
+      ref.invalidate(dashboardKotsProvider);
+      await ref.read(pendingSyncProvider.notifier).refresh();
+
+      _snack('"$name" cancelled', AppColors.success, Icons.check_circle_rounded);
+    } catch (e) {
+      _snack('Failed to cancel item: $e', AppColors.error,
+          Icons.error_outline_rounded);
+    } finally {
+      if (mounted) setState(() => _processing = false);
+    }
+  }
+
+  /// Drops one line from an order that was taken offline and hasn't synced yet:
+  /// removes the item from the queued "create" payload and rewrites the local
+  /// copy so it never reaches the server. If it was the last live line, the
+  /// whole order is voided. Returns true if the KOT was such an unsynced offline
+  /// order, false if it's a server-side KOT to cancel through the API instead.
+  Future<bool> _voidOfflineKotItem(
+      KotWithItems kot, Map<String, dynamic> item) async {
+    final menuItemId = item['menu_item_id'] as String?;
+    final ops = await OfflineStore.instance.pendingOps();
+    for (final op in ops) {
+      if (op.entityType != 'kot' || op.operation != 'create' || op.id == null) {
+        continue;
+      }
+      Map<String, dynamic> data;
+      try {
+        data = jsonDecode(op.payload) as Map<String, dynamic>;
+      } catch (_) {
+        continue;
+      }
+      if (data['id'] != kot.id) continue;
+
+      // This is the unsynced offline order — edit its queued payload.
+      final payloadItems =
+          (data['items'] as List?)?.cast<Map<String, dynamic>>() ?? [];
+      final remainingPayload = payloadItems
+          .where((it) => it['menuItemId'] != menuItemId)
+          .toList();
+
+      final storedItems = await OfflineStore.instance.itemsForKot(kot.id);
+      final remainingStored =
+          storedItems.where((i) => i.menuItemId != menuItemId).toList();
+
+      if (remainingPayload.isEmpty || remainingStored.isEmpty) {
+        // Nothing left — void the whole order (drop op + local copy).
+        await OfflineStore.instance.deleteOp(op.id!);
+        await OfflineStore.instance.deleteOfflineKot(kot.id);
+        return true;
+      }
+
+      // Persist the trimmed payload and rewrite the local KOT with the
+      // remaining lines (delete + re-save drops the removed item row).
+      data['items'] = remainingPayload;
+      op.payload = jsonEncode(data);
+      await OfflineStore.instance.saveOp(op);
+
+      final kots = await OfflineStore.instance.kotsForSession(kot.sessionId);
+      OfflineKot? storedKot;
+      for (final k in kots) {
+        if (k.id == kot.id) {
+          storedKot = k;
+          break;
+        }
+      }
+      await OfflineStore.instance.deleteOfflineKot(kot.id);
+      if (storedKot != null) {
+        await OfflineStore.instance.saveOfflineKot(storedKot, remainingStored);
+      }
+      return true;
+    }
+    return false;
+  }
+
   /// Voids an order that was taken offline and hasn't synced yet: removes its
   /// queued "create" from the outbox (so it never reaches the server) and drops
   /// the local copy. Returns true if it was such an order, false if it's a
@@ -2744,7 +2931,7 @@ class _CashierScreenState extends ConsumerState<CashierScreen>
   /// Reason picker for a cancellation — a preset must be chosen (or a custom one
   /// typed). Returns the reason, or null if the cashier backed out. Required by
   /// design so a void is always accountable in the audit log + on the slip.
-  Future<String?> _showCancelReasonDialog(KotWithItems kot) {
+  Future<String?> _showCancelReasonDialog(String title) {
     const presets = [
       'Wrong order entered',
       'Guest changed mind',
@@ -2768,7 +2955,7 @@ class _CashierScreenState extends ConsumerState<CashierScreen>
               const Icon(Icons.cancel_outlined, color: AppColors.error),
               const SizedBox(width: 10),
               Expanded(
-                child: Text('Cancel ${kot.kotNumber}?',
+                child: Text(title,
                     style: GoogleFonts.outfit(fontWeight: FontWeight.w700)),
               ),
             ]),

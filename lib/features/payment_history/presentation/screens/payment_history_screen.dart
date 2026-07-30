@@ -150,7 +150,8 @@ class _PaymentHistoryScreenState extends ConsumerState<PaymentHistoryScreen> {
                 final f = _filter(bills);
                 if (f.isEmpty) return Center(child: Text('No payments found', style: GoogleFonts.outfit(color: AppColors.textSecondary)));
                 final role = ref.watch(authNotifierProvider).value?.role;
-                final canRefund = role == 'branch_manager' || role == 'accountant';
+                final canRefund =
+                    role == 'branch_manager' || role == 'accountant' || role == 'cashier';
                 return ResponsiveContent(child: ListView.builder(
                   padding: const EdgeInsets.all(16),
                   itemCount: f.length,

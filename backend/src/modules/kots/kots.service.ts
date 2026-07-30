@@ -14,6 +14,11 @@ import { generateSequenceNumber } from '../../common/utils/sequence.util';
 
 const MANAGER_ROLES = ['branch_manager', 'super_admin'];
 
+// Who may void a single line that's already been fired to the kitchen. The
+// cashier owns the bill, so they can drop an item straight from the cashier
+// screen — same authority they already have to cancel a whole KOT.
+const ITEM_CANCEL_ROLES = ['branch_manager', 'super_admin', 'cashier'];
+
 const KOT_INCLUDE = {
   items: true,
   waiter: { select: { fullName: true } },
@@ -109,6 +114,7 @@ export class KotsService {
         kotNumber: generateSequenceNumber('KOT'),
         waiterId: dto.waiterId ?? currentUser.userId,
         itemsCount: dto.items.length,
+        notes: dto.notes,
         items: {
           create: dto.items.map((item) => ({
             menuItemId: item.menuItemId,
@@ -207,9 +213,9 @@ export class KotsService {
     const item = kot.items.find((i) => i.id === itemId);
     if (!item) throw new NotFoundException('KOT item not found');
 
-    if (dto.status === 'cancelled' && kot.status !== 'pending' && !MANAGER_ROLES.includes(currentUser.role)) {
+    if (dto.status === 'cancelled' && kot.status !== 'pending' && !ITEM_CANCEL_ROLES.includes(currentUser.role)) {
       throw new ForbiddenException(
-        'This order has already been sent to the kitchen — ask a manager to cancel this item',
+        'This order has already been sent to the kitchen — ask a cashier or manager to cancel this item',
       );
     }
 
@@ -223,6 +229,12 @@ export class KotsService {
       await this.restoreStockForItem(kot.branchId, item);
     }
 
+    // Dropping a line changes what the guest owes — keep the session total in
+    // step so the cashier's bill reflects the void immediately.
+    if (dto.status === 'cancelled') {
+      await this.recalculateSessionTotal(kot.sessionId);
+    }
+
     const response = await this.findOneResponse(kotId);
     this.realtime.kotStatusChanged(kot.branchId, response);
     if (dto.status === 'cancelled') {
@@ -234,6 +246,13 @@ export class KotsService {
         tableName: 'kots',
         rowId: kotId,
         oldValues: { itemId, name: item.name },
+        // Keep the reason + table with the void so a single-item cancel is as
+        // accountable in the audit log as a whole-KOT cancel.
+        newValues: {
+          status: 'cancelled',
+          tableNumber: (kot as any).table?.tableNumber ?? null,
+          reason: dto.reason ?? null,
+        },
       });
     }
     return updated;

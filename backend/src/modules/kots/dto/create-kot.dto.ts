@@ -33,6 +33,12 @@ export class CreateKotDto {
   @IsUUID()
   waiterId?: string;
 
+  /** Free-text note the waiter attaches to the whole order (e.g. "no onions",
+   * "serve together"). Printed on the kitchen/bar KOT ticket. */
+  @IsOptional()
+  @IsString()
+  notes?: string;
+
   @ValidateNested({ each: true })
   @Type(() => CreateKotItemDto)
   @ArrayMinSize(1)
