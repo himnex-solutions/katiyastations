@@ -2851,6 +2851,85 @@ class _CashierScreenState extends ConsumerState<CashierScreen>
     );
   }
 
+  /// Last-moment integrity check before a bill is settled. Re-pulls the
+  /// session's orders from the server and inspects this device's sync outbox.
+  /// Returns true to go ahead, false to abort (the cashier chose to review, and
+  /// the on-screen bill has already been refreshed to the latest).
+  Future<bool> _preSettleCheck(String sid, double shownSubtotal, int shownCount) async {
+    setState(() => _processing = true);
+    double freshSubtotal = shownSubtotal;
+    int freshCount = shownCount;
+    int pendingOps = 0;
+    try {
+      // Force a fresh server pull (not the cached value) + check the outbox.
+      ref.invalidate(sessionKotsProvider(sid));
+      ref.invalidate(sessionBillingProvider(sid));
+      final fresh = await ref.read(sessionBillingProvider(sid).future);
+      freshSubtotal = (fresh['subtotal'] as num?)?.toDouble() ?? shownSubtotal;
+      freshCount = (fresh['items'] as List?)?.length ?? shownCount;
+      pendingOps = await OfflineStore.instance.pendingCount();
+    } catch (_) {
+      // If the re-pull fails, don't block the sale — fall through to settle.
+    }
+    if (mounted) setState(() => _processing = false);
+
+    final changed =
+        (freshSubtotal - shownSubtotal).abs() > 0.01 || freshCount != shownCount;
+    if (!changed && pendingOps == 0) return true; // all good — settle
+
+    if (!mounted) return false;
+    final proceed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Row(children: [
+          const Icon(Icons.sync_problem_rounded, color: AppColors.warning),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text('Check the bill first',
+                style: GoogleFonts.outfit(fontWeight: FontWeight.w700)),
+          ),
+        ]),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (changed)
+              Text(
+                'This table\'s orders just changed — the bill was updated to '
+                '$freshCount item${freshCount == 1 ? '' : 's'} '
+                '(NPR ${fmt.format(freshSubtotal)}). Review it before charging.',
+                style: GoogleFonts.outfit(fontSize: 13, color: AppColors.textSecondary),
+              ),
+            if (pendingOps > 0) ...[
+              if (changed) const SizedBox(height: 10),
+              Text(
+                'This device still has $pendingOps order${pendingOps == 1 ? '' : 's'} '
+                'waiting to sync — they may not be on this bill yet. Wait for the '
+                'sync to finish, or settle once everything is uploaded.',
+                style: GoogleFonts.outfit(fontSize: 13, color: AppColors.textSecondary),
+              ),
+            ],
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Review orders'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.warning, foregroundColor: Colors.white),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Settle anyway'),
+          ),
+        ],
+      ),
+    );
+    // Default (dismiss / Review) → abort so the cashier sees the refreshed bill.
+    return proceed == true;
+  }
+
   Future<void> _settleBill(
       double total,
       double subtotal,
@@ -2870,6 +2949,16 @@ class _CashierScreenState extends ConsumerState<CashierScreen>
       ));
       return;
     }
+
+    // ── Pre-settle safeguard ──────────────────────────────────────────────
+    // Closing a bill is final, so make one last check that it's complete: pull
+    // the session's orders fresh from the server and look at this device's sync
+    // outbox. If an order just landed (e.g. synced from a waiter's tablet) or
+    // this device still has unsynced orders, warn before charging — so we never
+    // settle a bill that's missing an item.
+    final sid = _selectedSessionId!;
+    if (!await _preSettleCheck(sid, subtotal, items.length)) return;
+
     setState(() => _processing = true);
     try {
       // Only send amountPaid for a cash tender the cashier actually keyed (it

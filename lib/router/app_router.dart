@@ -78,7 +78,7 @@ const List<NavItem> allNavItems = [
   NavItem(label: 'Bar', icon: Icons.wine_bar, activeIcon: Icons.wine_bar, path: '/bar',
       allowedRoles: ['branch_manager', 'cashier', 'inventory']),
   NavItem(label: 'Purchases', icon: Icons.shopping_cart, activeIcon: Icons.shopping_cart, path: '/purchases',
-      allowedRoles: ['branch_manager', 'inventory']),
+      allowedRoles: ['branch_manager', 'inventory', 'cashier']),
   NavItem(label: 'Expenses', icon: Icons.payments, activeIcon: Icons.payments, path: '/expenses',
       allowedRoles: ['branch_manager', 'accountant']),
   NavItem(label: 'Credit', icon: Icons.credit_card, activeIcon: Icons.credit_card, path: '/credit',

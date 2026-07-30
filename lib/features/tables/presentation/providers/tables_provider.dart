@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/constants/api_constants.dart';
 import '../../../../core/network/api_client.dart';
@@ -15,14 +17,51 @@ import '../../../dashboard/presentation/screens/dashboard_screen.dart';
 // ─── All tables (by branch) ────────────────────────────────────────────────
 // Cached on success for offline viewing. While offline, cached tables are
 // shown with any table opened offline overlaid as "occupied".
+/// Offline-opened sessions that are STILL genuinely awaiting sync.
+///
+/// When online the server is authoritative: an offline session whose "open" is
+/// no longer sitting in the sync outbox has already synced (and may since have
+/// been billed and the table freed). Its local copy is then stale — keeping it
+/// would re-mark a freed table "occupied" or resurrect a closed session, but
+/// only on the device that still holds the stale entry. That's exactly the
+/// "some screens show occupied, some available after settle" glitch. So prune
+/// those against the outbox. Offline, keep them all (the server can't be asked).
+Future<Map<String, Map<String, dynamic>>> _pendingOfflineSessions(bool online) async {
+  final all = await OfflineCache.instance.allOfflineSessionsByTable();
+  if (all.isEmpty || !online) return all;
+
+  final ops = await OfflineStore.instance.pendingOps();
+  final pendingIds = <String>{};
+  for (final op in ops) {
+    if (op.entityType != 'session') continue;
+    try {
+      final id = (jsonDecode(op.payload) as Map)['id'] as String?;
+      if (id != null) pendingIds.add(id);
+    } catch (_) {/* skip a malformed op */}
+  }
+
+  final live = <String, Map<String, dynamic>>{};
+  for (final entry in all.entries) {
+    final sid = entry.value['id'] as String?;
+    if (sid != null && pendingIds.contains(sid)) {
+      live[entry.key] = entry.value;
+    } else {
+      // Synced already (or the open permanently failed) — drop the stale copy.
+      await OfflineCache.instance.removeOfflineSession(entry.key);
+    }
+  }
+  return live;
+}
+
 final tablesStreamProvider = FutureProvider<List<RestaurantTable>>((ref) async {
   final profile = ref.watch(authNotifierProvider).value;
   if (profile?.branchId == null) return [];
   final branchId = profile!.branchId!;
   final key = CacheKeys.tables(branchId);
+  final online = ref.read(connectivityProvider);
 
   List<dynamic> rows;
-  if (!ref.read(connectivityProvider)) {
+  if (!online) {
     // Offline: serve the cached tables instantly instead of waiting for a
     // network call to time out first.
     final cached = await OfflineCache.instance.get(key);
@@ -46,8 +85,10 @@ final tablesStreamProvider = FutureProvider<List<RestaurantTable>>((ref) async {
       rows.map((r) => RestaurantTable.fromJson(r as Map<String, dynamic>)).toList();
 
   // Overlay tables opened offline — their occupied state isn't on the server
-  // yet, so without this a just-opened table would look free again.
-  final offlineSessions = await OfflineCache.instance.allOfflineSessionsByTable();
+  // yet, so without this a just-opened table would look free again. Only
+  // still-pending offline sessions are overlaid; synced/stale ones are pruned
+  // (see _pendingOfflineSessions) so a freed table can't stay stuck "occupied".
+  final offlineSessions = await _pendingOfflineSessions(online);
   if (offlineSessions.isNotEmpty) {
     tables = tables.map((t) {
       final s = offlineSessions[t.id];
@@ -71,10 +112,11 @@ final activeSessionsStreamProvider = FutureProvider<List<TableSession>>((ref) as
   if (profile?.branchId == null) return [];
   final branchId = profile!.branchId!;
   final key = CacheKeys.openSessions(branchId);
+  final online = ref.read(connectivityProvider);
 
   var sessions = <TableSession>[];
   List<dynamic>? cachedRows;
-  if (!ref.read(connectivityProvider)) {
+  if (!online) {
     // Offline: read the cache straight away, no network round-trip.
     final cached = await OfflineCache.instance.get(key);
     cachedRows = cached is List ? cached : const <dynamic>[];
@@ -95,8 +137,10 @@ final activeSessionsStreamProvider = FutureProvider<List<TableSession>>((ref) as
       .map((r) => TableSession.fromJson(r as Map<String, dynamic>))
       .toList();
 
-  // Include sessions opened offline that the server hasn't seen yet.
-  final offlineSessions = await OfflineCache.instance.allOfflineSessionsByTable();
+  // Include sessions opened offline that the server hasn't seen yet — but only
+  // ones still pending sync, so a billed/closed session can't be resurrected as
+  // "active" from a stale local copy (see _pendingOfflineSessions).
+  final offlineSessions = await _pendingOfflineSessions(online);
   if (offlineSessions.isNotEmpty) {
     final ids = sessions.map((s) => s.id).toSet();
     for (final json in offlineSessions.values) {
