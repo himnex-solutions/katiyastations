@@ -33,9 +33,8 @@ final creditProvider = FutureProvider<List<CreditRecord>>((ref) async {
     all.addAll(
       rows.map((r) => CreditRecord.fromJson(r as Map<String, dynamic>)),
     );
-    final meta = data['meta'] as Map<String, dynamic>?;
-    final totalPages = (meta?['totalPages'] as num?)?.toInt() ?? 1;
-    if (rows.isEmpty || page >= totalPages) break;
+    // Stop on a short page — independent of the server's meta/totalPages.
+    if (rows.length < 100) break;
     page++;
   }
   return all;

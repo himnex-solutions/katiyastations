@@ -37,12 +37,16 @@ final billsStreamProvider =
         range.end.add(const Duration(days: 1)).toUtc().toIso8601String();
   }
 
-  // Walk every page for the current query so nothing is silently truncated.
-  // The 50-page ceiling (~5000 bills) is a runaway guard; a chosen date range
-  // keeps the set small, and the loop stops as soon as the last page is read.
+  // Walk every page until one comes back SHORT of a full 100 rows — that's the
+  // definitive "last page" signal and, crucially, does NOT depend on the
+  // server's meta/totalPages. The earlier version trusted meta.totalPages; if
+  // the response lacked a proper meta it read as 1 and the loop stopped after
+  // the first 100 — which is exactly why revenue/search never saw past 100.
+  // The 100-page ceiling (~10k bills) is only a runaway guard.
+  const pageSize = 100;
   final all = <Bill>[];
   var page = 1;
-  const maxPages = 50;
+  const maxPages = 100;
   while (page <= maxPages) {
     final response = await ApiClient.instance.get(
       ApiConstants.paymentHistory,
@@ -51,9 +55,7 @@ final billsStreamProvider =
     final data = response.data as Map<String, dynamic>;
     final rows = List<Map<String, dynamic>>.from(data['data'] as List? ?? []);
     all.addAll(rows.map((r) => Bill.fromJson(r)));
-    final meta = data['meta'] as Map<String, dynamic>?;
-    final totalPages = (meta?['totalPages'] as num?)?.toInt() ?? 1;
-    if (rows.isEmpty || page >= totalPages) break;
+    if (rows.length < pageSize) break; // last page reached
     page++;
   }
   return all;

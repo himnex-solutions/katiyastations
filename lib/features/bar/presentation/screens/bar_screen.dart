@@ -35,9 +35,8 @@ final barStockProvider = FutureProvider<List<BarStockItem>>((ref) async {
     all.addAll(
       rows.map((r) => BarStockItem.fromJson(r as Map<String, dynamic>)),
     );
-    final meta = data['meta'] as Map<String, dynamic>?;
-    final totalPages = (meta?['totalPages'] as num?)?.toInt() ?? 1;
-    if (rows.isEmpty || page >= totalPages) break;
+    // Stop on a short page — independent of the server's meta/totalPages.
+    if (rows.length < 100) break;
     page++;
   }
   all.sort((a, b) => a.name.compareTo(b.name));
