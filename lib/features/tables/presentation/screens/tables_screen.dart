@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_animate/flutter_animate.dart';
@@ -9,6 +11,7 @@ import '../../../../core/utils/date_time_utils.dart';
 import '../../../../core/widgets/app_snackbar.dart';
 import '../../../../core/widgets/confirm_dialog.dart';
 import '../../../../core/utils/responsive_utils.dart';
+import '../../../../core/offline/connectivity_provider.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
 import '../providers/tables_provider.dart';
 import '../../domain/entities/table_entities.dart';
@@ -27,14 +30,33 @@ class _TablesScreenState extends ConsumerState<TablesScreen>
   late TabController _tabController;
   String _selectedSection = 'All';
 
+  // Backstop refresh. Live socket events (bill:generated, tableStatusChanged)
+  // normally free a table the instant a cashier settles — but socket.io does
+  // NOT replay events missed while a device's connection was briefly dropped or
+  // half-open (backgrounded app, flaky Wi-Fi). Without a periodic re-pull, that
+  // one device could keep showing a freed table as "occupied" indefinitely,
+  // which is the "some waiter screens still occupied after billing" glitch.
+  // A light server re-fetch every few seconds guarantees it self-corrects.
+  Timer? _refreshPoll;
+  static const _refreshInterval = Duration(seconds: 5);
+
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
+    _refreshPoll = Timer.periodic(_refreshInterval, (_) {
+      if (!mounted) return;
+      // Nothing to re-pull while offline — the server can't be reached and the
+      // local overlay already reflects this device's own opens/settles.
+      if (!ref.read(connectivityProvider)) return;
+      ref.invalidate(tablesStreamProvider);
+      ref.invalidate(activeSessionsStreamProvider);
+    });
   }
 
   @override
   void dispose() {
+    _refreshPoll?.cancel();
     _tabController.dispose();
     super.dispose();
   }
@@ -102,6 +124,9 @@ class _TablesScreenState extends ConsumerState<TablesScreen>
         children: [
           // ── Floor Layout Tab ──────────────────────────────────────────
           tablesAsync.when(
+            // Keep the current floor visible while the backstop poll re-pulls,
+            // so a freed table updating in place never flickers the whole grid.
+            skipLoadingOnReload: true,
             loading: () =>
                 const Center(child: CircularProgressIndicator(color: AppColors.primary)),
             error: (e, _) => Center(
