@@ -1239,7 +1239,10 @@ class _SettleOnlineSheetState extends ConsumerState<_SettleOnlineSheet> {
                     color: _applyServiceCharge ? AppColors.warning : AppColors.textHint)),
             Switch(
               value: _applyServiceCharge,
-              activeThumbColor: AppColors.primary,
+              // `activeColor` (not `activeThumbColor`) — the latter only exists
+              // from Flutter ~3.34, and the Vercel web build is pinned to 3.32.0.
+              // ignore: deprecated_member_use
+              activeColor: AppColors.primary,
               onChanged: _busy ? null : (v) => setState(() => _applyServiceCharge = v),
             ),
           ]),
