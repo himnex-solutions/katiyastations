@@ -14,14 +14,34 @@ import '../../../../core/widgets/notification_bell.dart';
 final barStockProvider = FutureProvider<List<BarStockItem>>((ref) async {
   final profile = ref.watch(authNotifierProvider).value;
   if (profile?.branchId == null) return [];
-  final response = await ApiClient.instance.get(
-    ApiConstants.barStock,
-    queryParameters: {'branchId': profile!.branchId!},
-  );
-  final data = response.data as Map<String, dynamic>;
-  final rows = data['data'] as List<dynamic>;
-  return rows.map((r) => BarStockItem.fromJson(r as Map<String, dynamic>)).toList()
-    ..sort((a, b) => a.name.compareTo(b.name));
+  final branchId = profile!.branchId!;
+
+  // `/bar/stock` is paginated and defaults to just 20 rows per page. Sending no
+  // limit (as this once did) silently capped Bar Management at the first 20
+  // bottles alphabetically — so a newly-added bottle that sorts later never
+  // showed here, and the client-side search couldn't find what was never
+  // fetched, even though the menu auto-deduct dropdown (which asks for 100)
+  // listed it. Walk every page (100 is the backend's @Max) so the full stock
+  // always loads, no matter how many bottles the branch has.
+  final all = <BarStockItem>[];
+  var page = 1;
+  while (true) {
+    final response = await ApiClient.instance.get(
+      ApiConstants.barStock,
+      queryParameters: {'branchId': branchId, 'page': '$page', 'limit': '100'},
+    );
+    final data = response.data as Map<String, dynamic>;
+    final rows = (data['data'] as List?) ?? const [];
+    all.addAll(
+      rows.map((r) => BarStockItem.fromJson(r as Map<String, dynamic>)),
+    );
+    final meta = data['meta'] as Map<String, dynamic>?;
+    final totalPages = (meta?['totalPages'] as num?)?.toInt() ?? 1;
+    if (rows.isEmpty || page >= totalPages) break;
+    page++;
+  }
+  all.sort((a, b) => a.name.compareTo(b.name));
+  return all;
 });
 
 class BarScreen extends ConsumerStatefulWidget {

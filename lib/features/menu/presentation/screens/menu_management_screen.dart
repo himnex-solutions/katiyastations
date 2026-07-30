@@ -67,14 +67,27 @@ final menuBarStockProvider =
     FutureProvider<List<Map<String, dynamic>>>((ref) async {
   final profile = ref.watch(authNotifierProvider).value;
   if (profile?.branchId == null) return [];
-  final response = await ApiClient.instance.get(
-    ApiConstants.barStock,
-    // 100 is the backend's max page size (PaginationDto @Max(100)); asking for
-    // more (was 300) fails validation and left this list silently empty.
-    queryParameters: {'branchId': profile!.branchId!, 'limit': '100'},
-  );
-  final data = response.data as Map<String, dynamic>;
-  return List<Map<String, dynamic>>.from(data['data'] as List? ?? []);
+  final branchId = profile!.branchId!;
+
+  // Walk every page (100 is the backend's @Max page size) so the link dropdown
+  // lists every bottle even once a branch has more than 100 — matching what Bar
+  // Management now loads, so the two lists can never diverge.
+  final all = <Map<String, dynamic>>[];
+  var page = 1;
+  while (true) {
+    final response = await ApiClient.instance.get(
+      ApiConstants.barStock,
+      queryParameters: {'branchId': branchId, 'page': '$page', 'limit': '100'},
+    );
+    final data = response.data as Map<String, dynamic>;
+    final rows = List<Map<String, dynamic>>.from(data['data'] as List? ?? []);
+    all.addAll(rows);
+    final meta = data['meta'] as Map<String, dynamic>?;
+    final totalPages = (meta?['totalPages'] as num?)?.toInt() ?? 1;
+    if (rows.isEmpty || page >= totalPages) break;
+    page++;
+  }
+  return all;
 });
 
 /// Reloads every cached view of the menu — this screen's three providers plus
