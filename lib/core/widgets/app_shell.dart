@@ -7,6 +7,7 @@ import '../constants/app_colors.dart';
 import 'confirm_dialog.dart';
 import '../../features/auth/presentation/providers/auth_provider.dart';
 import '../../router/app_router.dart';
+import '../lan/lan_sync_provider.dart';
 import '../network/realtime_sync.dart';
 import '../printing/kot_auto_print.dart';
 import '../printing/printer_config.dart';
@@ -59,6 +60,10 @@ class AppShell extends ConsumerWidget {
     // Starts connectivity monitoring for the whole session — drives the
     // offline banner and flushes the offline order queue on reconnect.
     ref.watch(connectivityProvider);
+    // The LAN twin of realtimeSyncProvider: with no internet there is no
+    // Socket.IO, so orders taken offline on a waiter's tablet reach the
+    // cashier's till over the shop's own Wi-Fi instead. No-op on web.
+    ref.watch(lanSyncProvider);
     // Hydrate BOTH printer setups (receipt + KOT) from storage the moment the
     // app opens / a user logs in, and keep a live reachability probe running —
     // so a correctly-configured LAN printer is connected and ready to print

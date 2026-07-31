@@ -1,7 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/constants/api_constants.dart';
 import '../../../../core/network/api_client.dart';
 import '../../../../core/errors/app_exceptions.dart';
+import '../../../../core/lan/lan_config.dart';
+import '../../../../core/lan/lan_mirror.dart';
+import '../../../../core/lan/lan_sync.dart';
 import '../../../../core/offline/connectivity_provider.dart';
 import '../../../../core/offline/offline_cache.dart';
 import '../../../../core/offline/offline_store.dart'; // OfflineKot/Item models
@@ -154,6 +159,9 @@ final sessionKotsProvider =
     FutureProvider.family<List<KotWithItems>, String>((ref, sessionId) async {
   if (sessionId.isEmpty) return [];
   var serverKots = <KotWithItems>[];
+  // Did the server actually answer? Only then is its list authoritative enough
+  // to prune local copies against.
+  var serverAnswered = false;
   // Offline: skip the server call entirely (no 5s stall) and show the orders
   // stored locally on this device.
   if (ref.read(connectivityProvider)) {
@@ -164,6 +172,7 @@ final sessionKotsProvider =
       serverKots = rows
           .map((r) => _kotWithItemsFromJson(r as Map<String, dynamic>))
           .toList();
+      serverAnswered = true;
     } on NetworkException {
       // Dropped mid-request — fall through to locally-stored orders only.
     }
@@ -171,6 +180,19 @@ final sessionKotsProvider =
   final offline = await _offlineKotsFor(sessionId);
   if (offline.isEmpty) return serverKots;
   final serverIds = serverKots.map((k) => k.id).toSet();
+
+  // The server now has this order, so the local copy has done its job — drop
+  // it. Covers our own synced orders AND ones mirrored in over the LAN from
+  // another device, which would otherwise sit in Isar for good (they carry no
+  // outbox op of their own, so the sync engine never cleans them up).
+  if (serverAnswered) {
+    for (final k in offline) {
+      if (serverIds.contains(k.id)) {
+        unawaited(OfflineStore.instance.deleteOfflineKot(k.id));
+      }
+    }
+  }
+
   return [...serverKots, ...offline.where((k) => !serverIds.contains(k.id))];
 });
 
@@ -362,6 +384,23 @@ class OrderNotifier extends StateNotifier<List<CartItem>> {
         _ref.invalidate(dashboardKotsProvider);
         _ref.invalidate(dashboardSessionsProvider);
 
+        // Also mirror over the LAN. The cloud socket already tells every
+        // ONLINE device about this order — this covers the lopsided case where
+        // the sender has internet (a tablet on mobile data, say) but the till
+        // does not. The till dedupes on the KOT id, so it costs nothing when
+        // both routes deliver.
+        _publishKot(
+          kotId: kot.id,
+          kotNumber: kot.kotNumber,
+          sessionId: sessionId,
+          tableId: tableId,
+          branchId: kot.branchId,
+          waiterId: waiterId,
+          waiterName: waiterName,
+          cart: cart,
+          createdAt: kot.createdAt,
+        );
+
         clearCart();
         return kot;
       } on NetworkException {
@@ -380,6 +419,53 @@ class OrderNotifier extends StateNotifier<List<CartItem>> {
       cart: cart,
       itemsPayload: itemsPayload,
     );
+  }
+
+  /// Mirrors a KOT to the other devices over the LAN, rebuilding it in the
+  /// same shape the offline path stores so the receiving side has one code
+  /// path for both. Items carry their name and unit price, so a till can price
+  /// the bill without its own menu cache being in step.
+  void _publishKot({
+    required String kotId,
+    required String kotNumber,
+    required String sessionId,
+    required String tableId,
+    required String branchId,
+    required String? waiterId,
+    required String? waiterName,
+    required List<CartItem> cart,
+    required DateTime createdAt,
+  }) {
+    final kot = OfflineKot()
+      ..id = kotId
+      ..branchId = branchId
+      ..sessionId = sessionId
+      ..tableId = tableId
+      ..kotNumber = kotNumber
+      ..status = 'pending'
+      ..waiterId = waiterId
+      ..waiterName = waiterName
+      ..createdAt = createdAt
+      ..isPendingSync = false
+      ..syncedAt = createdAt;
+
+    final items = cart
+        .map((c) => OfflineKotItem()
+          ..id = newOfflineId()
+          ..kotId = kotId
+          ..menuItemId = c.item.id
+          ..menuItemName = c.item.name
+          ..quantity = c.quantity
+          ..unitPrice = c.item.price
+          ..notes = c.notes
+          ..createdAt = createdAt)
+        .toList();
+
+    LanSync.instance.publish(LanMirror.kotEnvelope(
+      deviceId: _ref.read(lanConfigProvider).deviceId,
+      kot: kot,
+      items: items,
+    ));
   }
 
   /// Persists a KOT locally and queues it for upload — used when the device is
@@ -425,6 +511,17 @@ class OrderNotifier extends StateNotifier<List<CartItem>> {
         .toList();
 
     await OfflineStore.instance.saveOfflineKot(offlineKot, offlineItems);
+
+    // Replicate to the cashier's till over the LAN. Without this the order is
+    // invisible at the counter until the internet returns — the KOT prints and
+    // the food is cooked, but nobody can bill it. Fire-and-forget: a hub that
+    // is down must never stop the waiter sending the order.
+    LanSync.instance.publish(LanMirror.kotEnvelope(
+      deviceId: _ref.read(lanConfigProvider).deviceId,
+      kot: offlineKot,
+      items: offlineItems,
+    ));
+
     await OfflineStore.instance.enqueue(
       entityType: 'kot',
       operation: 'create',

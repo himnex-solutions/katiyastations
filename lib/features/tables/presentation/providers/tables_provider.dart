@@ -4,6 +4,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/constants/api_constants.dart';
 import '../../../../core/network/api_client.dart';
 import '../../../../core/errors/app_exceptions.dart';
+import '../../../../core/lan/lan_config.dart';
+import '../../../../core/lan/lan_mirror.dart';
+import '../../../../core/lan/lan_sync.dart';
 import '../../../../core/offline/connectivity_provider.dart';
 import '../../../../core/offline/offline_cache.dart';
 import '../../../../core/offline/offline_store.dart';
@@ -292,7 +295,12 @@ class TableNotifier extends StateNotifier<AsyncValue<void>> {
         );
         _invalidateAll(tableId);
         state = const AsyncValue.data(null);
-        return TableSession.fromJson(response.data as Map<String, dynamic>);
+        final sessionJson = response.data as Map<String, dynamic>;
+        // Mirror over the LAN as well, for devices that can't hear the cloud
+        // socket right now — a till that can't see the table open can't take
+        // the orders that follow it.
+        _publishSession(tableId, sessionJson);
+        return TableSession.fromJson(sessionJson);
       } on NetworkException {
         // Dropped mid-request — open it offline instead.
       } catch (e) {
@@ -302,6 +310,22 @@ class TableNotifier extends StateNotifier<AsyncValue<void>> {
     }
 
     return _openSessionOffline(tableId, sessionId, guestCount);
+  }
+
+  /// Tells the other devices on the LAN that this table is now open, passing
+  /// the session JSON through verbatim so they store exactly what we did.
+  /// Fire-and-forget — no hub, no problem.
+  void _publishSession(String tableId, Map<String, dynamic> sessionJson) {
+    final branchId = sessionJson['branch_id'] as String? ??
+        _ref.read(authNotifierProvider).value?.branchId ??
+        '';
+    if (branchId.isEmpty) return;
+    LanSync.instance.publish(LanMirror.sessionEnvelope(
+      deviceId: _ref.read(lanConfigProvider).deviceId,
+      branchId: branchId,
+      tableId: tableId,
+      sessionJson: sessionJson,
+    ));
   }
 
   /// Opens a table locally and queues the "open" for upload — used when the
@@ -329,6 +353,7 @@ class TableNotifier extends StateNotifier<AsyncValue<void>> {
     };
 
     await OfflineCache.instance.putOfflineSession(tableId, sessionJson);
+    _publishSession(tableId, sessionJson);
     await OfflineStore.instance.enqueue(
       entityType: 'session',
       operation: 'create',

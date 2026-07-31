@@ -6,6 +6,7 @@
 // a duplicate order.
 // ============================================================
 
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -26,7 +27,24 @@ import '../../features/cashier/presentation/screens/online_orders_screen.dart';
 
 enum _Replay { ok, transient, permanentFail }
 
-final syncEngineProvider = Provider<SyncEngine>((ref) => SyncEngine(ref));
+/// How many times a 404/409 is retried before being parked as failed.
+///
+/// These used to fail permanently on the first try, on the reasoning that a
+/// replay can't fix them. That stopped being true once devices could bill each
+/// other's offline work over the LAN: the cashier's queued bill references a
+/// session that may still be sitting in the WAITER's outbox, and the two drain
+/// independently. Arriving first is then a 404 on a record that is seconds
+/// away from existing — and parking it silently loses a paid bill.
+const int _kOutOfOrderRetries = 8;
+
+/// Gap between re-drains while anything is still pending.
+const Duration _kRetryInterval = Duration(seconds: 20);
+
+final syncEngineProvider = Provider<SyncEngine>((ref) {
+  final engine = SyncEngine(ref);
+  ref.onDispose(engine.dispose);
+  return engine;
+});
 
 /// Live count of not-yet-synced operations, for the offline banner/badge.
 final pendingSyncProvider =
@@ -45,13 +63,23 @@ class PendingSyncController extends StateNotifier<int> {
 class SyncEngine {
   final Ref _ref;
   bool _running = false;
+  Timer? _retry;
+  bool _disposed = false;
 
   SyncEngine(this._ref);
+
+  void dispose() {
+    _disposed = true;
+    _retry?.cancel();
+    _retry = null;
+  }
 
   /// Replay every pending operation, oldest first. Safe to call repeatedly and
   /// concurrently — a second call while one is running is a no-op.
   Future<void> syncNow() async {
-    if (_running || !OfflineStore.instance.isReady) return;
+    if (_running || _disposed || !OfflineStore.instance.isReady) return;
+    _retry?.cancel();
+    _retry = null;
     _running = true;
     try {
       final ops = await OfflineStore.instance.pendingOps();
@@ -77,8 +105,24 @@ class SyncEngine {
     // after merely *viewing* screens offline still needs the latest server data
     // pulled in (other devices may have changed tables/bills/orders meanwhile),
     // which is the "stale until I log out and back in" case.
+    if (_disposed) return;
     _refreshProviders();
     await _ref.read(pendingSyncProvider.notifier).refresh();
+
+    // Anything left means the drain stopped on a transient failure — most
+    // often an op waiting on a record that is still in another device's queue.
+    // Come back for it on a timer: waiting for the next offline→online flip
+    // means waiting for the connection to drop again, which may never happen,
+    // and the queue would sit there for the rest of the shift.
+    if (await OfflineStore.instance.pendingCount() > 0) _scheduleRetry();
+  }
+
+  void _scheduleRetry() {
+    if (_disposed || _retry != null) return;
+    _retry = Timer(_kRetryInterval, () {
+      _retry = null;
+      unawaited(syncNow());
+    });
   }
 
   Future<_Replay> _replay(SyncQueueItem op) async {
@@ -107,10 +151,16 @@ class SyncEngine {
       return _Replay.transient; // token refresh in flight; retry after
     } on ApiException catch (e) {
       if (e.isServerError) return _Replay.transient;
-      // 404 / 409 / 422 etc. — replaying won't fix it (e.g. table already
-      // taken). Park it as failed so it doesn't block the rest of the queue.
       op.errorMessage = e.message;
       op.retryCount += 1;
+      // A 404 or 409 is often "not yet" rather than "never": the parent record
+      // may still be in ANOTHER device's outbox (see _kOutOfOrderRetries).
+      // Retry for a bounded window before giving up.
+      if ((e.isNotFound || e.isConflict) && op.retryCount < _kOutOfOrderRetries) {
+        return _Replay.transient;
+      }
+      // 422 and friends — replaying genuinely won't fix it. Park it as failed
+      // so it doesn't block the rest of the queue.
       return _Replay.permanentFail;
     } on AppException catch (e) {
       // Validation / permission — permanent.

@@ -6,6 +6,9 @@ import 'package:google_fonts/google_fonts.dart';
 import '../../../../core/constants/app_colors.dart';
 import '../../../../core/utils/responsive_utils.dart';
 import '../../../../core/constants/app_constants.dart';
+import '../../../../core/lan/lan_config.dart';
+import '../../../../core/lan/lan_sync.dart';
+import '../../../../core/lan/lan_sync_provider.dart';
 import '../../../../core/printing/printer_config.dart';
 import '../../../../core/printing/printer_status.dart';
 import '../../../../core/printing/printer_status_pill.dart';
@@ -119,6 +122,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                     'device that takes orders.',
               ),
             ),
+            const SizedBox(height: 24),
+            const _SectionHeader('Offline Sync (Local Wi-Fi)'),
+            const SizedBox(height: 12),
+            const _LanSyncCard(),
             const SizedBox(height: 24),
             const _SectionHeader('System Info'),
             const SizedBox(height: 12),
@@ -361,6 +368,252 @@ class _PrinterSettingsCardState extends ConsumerState<_PrinterSettingsCard> {
             subtitle: Text(
               widget.barAutoPrint!.subtitle,
               style: GoogleFonts.outfit(fontSize: 11, color: AppColors.textSecondary, height: 1.3),
+            ),
+          ),
+        ],
+      ]),
+    );
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  LAN SYNC CARD — device-to-device offline sync over the shop's Wi-Fi
+//
+//  Without this, an order taken while the internet is down lives only on the
+//  tablet that took it: the KOT prints, the food is cooked, and the cashier
+//  cannot see the order to bill it until the connection returns. Turning one
+//  device (the cashier PC) into the hub gives the others a route to it that
+//  doesn't leave the building.
+// ═══════════════════════════════════════════════════════════════════════
+class _LanSyncCard extends ConsumerStatefulWidget {
+  const _LanSyncCard();
+  @override
+  ConsumerState<_LanSyncCard> createState() => _LanSyncCardState();
+}
+
+class _LanSyncCardState extends ConsumerState<_LanSyncCard> {
+  final _hostCtrl = TextEditingController();
+  bool _testing = false;
+  bool _hydrated = false;
+
+  @override
+  void dispose() {
+    _hostCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _test() async {
+    final cfg = ref.read(lanConfigProvider);
+    final host = _hostCtrl.text.trim();
+    if (host.isEmpty) return;
+    setState(() => _testing = true);
+    final error = await LanSync.instance.probe(host, cfg.port);
+    if (!mounted) return;
+    setState(() => _testing = false);
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      backgroundColor: error == null ? AppColors.success : AppColors.error,
+      behavior: SnackBarBehavior.floating,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      margin: const EdgeInsets.all(16),
+      content: Text(
+        error ?? 'Hub reached at $host.',
+        style: GoogleFonts.outfit(color: Colors.white, fontWeight: FontWeight.w600),
+      ),
+    ));
+  }
+
+  Color _statusColor(LanRole role) => switch (role) {
+        LanRole.hub || LanRole.client => AppColors.success,
+        LanRole.searching => AppColors.warning,
+        LanRole.disabled || LanRole.unsupported => AppColors.textHint,
+      };
+
+  @override
+  Widget build(BuildContext context) {
+    final cfg = ref.watch(lanConfigProvider);
+    final status = ref.watch(lanStatusProvider).value ?? LanSync.instance.status;
+    final supported = status.role != LanRole.unsupported;
+
+    // Seed the field from storage once, then leave it alone — rewriting it on
+    // every rebuild would fight the user's cursor as they type an address.
+    if (!_hydrated && cfg.deviceId.isNotEmpty) {
+      _hydrated = true;
+      _hostCtrl.text = cfg.manualHost;
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.card,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Column(children: [
+        if (!supported) ...[
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: AppColors.warning.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: AppColors.warning.withValues(alpha: 0.3)),
+            ),
+            child: Row(children: [
+              const Icon(Icons.info_outline_rounded, size: 18, color: AppColors.warning),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  'Wi-Fi sync needs the Windows or Android app — a browser can’t '
+                  'reach other devices on the local network.',
+                  style: GoogleFonts.outfit(
+                      fontSize: 12, color: AppColors.textSecondary, height: 1.4),
+                ),
+              ),
+            ]),
+          ),
+          const SizedBox(height: 14),
+        ],
+
+        // Live status — the one line that answers "is the safety net on?"
+        Row(children: [
+          Container(
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(
+              color: _statusColor(status.role).withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Icon(
+              cfg.isHub ? Icons.hub_rounded : Icons.wifi_tethering_rounded,
+              color: _statusColor(status.role),
+            ),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(
+                status.address.isEmpty
+                    ? status.headline
+                    : '${status.headline} · ${status.address}',
+                style: GoogleFonts.outfit(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.textPrimary),
+              ),
+              Text(
+                status.role == LanRole.hub
+                    ? '${status.peerCount} device(s) connected · ${status.received} order(s) received'
+                    : status.detail,
+                style: GoogleFonts.outfit(fontSize: 12, color: AppColors.textSecondary),
+              ),
+            ]),
+          ),
+        ]),
+
+        const Divider(height: 28),
+
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          thumbColor: const WidgetStatePropertyAll(AppColors.primary),
+          value: cfg.enabled,
+          onChanged: supported
+              ? (v) => ref.read(lanConfigProvider.notifier).setEnabled(v)
+              : null,
+          title: Text('Share offline orders over Wi-Fi',
+              style: GoogleFonts.outfit(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.textPrimary)),
+          subtitle: Text(
+            'Keeps the cashier’s till up to date with orders taken while the '
+            'internet is down. Leave this on for every device.',
+            style: GoogleFonts.outfit(
+                fontSize: 11, color: AppColors.textSecondary, height: 1.3),
+          ),
+        ),
+
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          thumbColor: const WidgetStatePropertyAll(AppColors.primary),
+          value: cfg.isHub,
+          onChanged: (supported && cfg.enabled)
+              ? (v) => ref.read(lanConfigProvider.notifier).setIsHub(v)
+              : null,
+          title: Text('Act as local hub (this device)',
+              style: GoogleFonts.outfit(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.textPrimary)),
+          subtitle: Text(
+            'Turn on for the CASHIER PC only — the one that stays on all '
+            'service. Every other device sends its offline orders here. '
+            'Two hubs on one network will split the orders between them.',
+            style: GoogleFonts.outfit(
+                fontSize: 11, color: AppColors.textSecondary, height: 1.3),
+          ),
+        ),
+
+        // Address override — only meaningful on a device that is NOT the hub.
+        if (!cfg.isHub) ...[
+          const Divider(height: 28),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: Text(
+              'Hub address',
+              style: GoogleFonts.outfit(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.textPrimary),
+            ),
+          ),
+          const SizedBox(height: 4),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: Text(
+              'Leave empty to find the hub automatically. Fill it in only if '
+              'auto-detect fails — some networks block the broadcast it uses.',
+              style: GoogleFonts.outfit(
+                  fontSize: 11, color: AppColors.textSecondary, height: 1.3),
+            ),
+          ),
+          const SizedBox(height: 10),
+          Row(children: [
+            Expanded(
+              child: TextField(
+                controller: _hostCtrl,
+                enabled: supported && cfg.enabled,
+                style: GoogleFonts.outfit(fontSize: 13, color: AppColors.textPrimary),
+                decoration: InputDecoration(
+                  isDense: true,
+                  hintText: 'e.g. 192.168.1.40 (auto)',
+                  hintStyle: GoogleFonts.outfit(fontSize: 13, color: AppColors.textHint),
+                  border: const OutlineInputBorder(),
+                ),
+                onSubmitted: (v) =>
+                    ref.read(lanConfigProvider.notifier).setManualHost(v),
+              ),
+            ),
+            const SizedBox(width: 10),
+            OutlinedButton(
+              onPressed: (supported && cfg.enabled && !_testing) ? _test : null,
+              child: _testing
+                  ? const SizedBox(
+                      width: 14,
+                      height: 14,
+                      child: CircularProgressIndicator(strokeWidth: 2))
+                  : const Text('Test'),
+            ),
+          ]),
+          const SizedBox(height: 10),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton.icon(
+              onPressed: (supported && cfg.enabled)
+                  ? () => ref
+                      .read(lanConfigProvider.notifier)
+                      .setManualHost(_hostCtrl.text)
+                  : null,
+              icon: const Icon(Icons.save_rounded, size: 16),
+              label: const Text('Save address'),
             ),
           ),
         ],

@@ -8,6 +8,9 @@ import '../../../../core/constants/app_colors.dart';
 import '../../../../core/constants/app_constants.dart';
 import '../../../../core/constants/api_constants.dart';
 import '../../../../core/network/api_client.dart';
+import '../../../../core/lan/lan_config.dart';
+import '../../../../core/lan/lan_mirror.dart';
+import '../../../../core/lan/lan_sync.dart';
 import '../../../../core/offline/connectivity_provider.dart';
 import '../../../../core/offline/offline_cache.dart';
 import '../../../../core/offline/offline_ids.dart';
@@ -2711,6 +2714,9 @@ class _CashierScreenState extends ConsumerState<CashierScreen>
     setState(() => _processing = true);
     try {
       final voidedLocally = await _voidUnsyncedOfflineKot(kot.id);
+      // Tell the other devices either way: an order voided here must not stay
+      // on the waiter's screen or on a second till's copy of the bill.
+      _publishKotVoided(kot.id);
       if (!voidedLocally) {
         if (ref.read(connectivityProvider)) {
           await ApiClient.instance.patch(
@@ -3119,6 +3125,30 @@ class _CashierScreenState extends ConsumerState<CashierScreen>
     return proceed == true;
   }
 
+  /// Announces a settled session to the other devices over the LAN. Fire-and-
+  /// forget: no hub reachable simply means we're back to today's behaviour.
+  void _publishBillSettled(String sessionId) {
+    final branchId = ref.read(authNotifierProvider).value?.branchId ?? '';
+    if (branchId.isEmpty) return;
+    LanSync.instance.publish(LanMirror.billEnvelope(
+      deviceId: ref.read(lanConfigProvider).deviceId,
+      branchId: branchId,
+      sessionId: sessionId,
+    ));
+  }
+
+  /// Announces a voided order, so it drops off every other device's copy of
+  /// the bill rather than being charged to the guest at another till.
+  void _publishKotVoided(String kotId) {
+    final branchId = ref.read(authNotifierProvider).value?.branchId ?? '';
+    if (branchId.isEmpty) return;
+    LanSync.instance.publish(LanMirror.kotVoidEnvelope(
+      deviceId: ref.read(lanConfigProvider).deviceId,
+      branchId: branchId,
+      kotId: kotId,
+    ));
+  }
+
   /// Settles a bill while OFFLINE. Saves it to the sync outbox with a client
   /// bill id, frees the table on this device, and prints a PROVISIONAL receipt
   /// (no official invoice number yet). On reconnect the sync engine replays it
@@ -3155,6 +3185,10 @@ class _CashierScreenState extends ConsumerState<CashierScreen>
 
       // Free the table on THIS device so it isn't billed twice while queued.
       await OfflineCache.instance.putBilledOfflineSession(sid);
+      // …and tell the other devices over the LAN, so the waiter's tablet shows
+      // the table free and a second till can't settle the same session again
+      // while everyone is still offline.
+      _publishBillSettled(sid);
 
       // Print a provisional receipt — no invoice number, so it prints as
       // "BILL (not a tax invoice)"; the numbered invoice follows on sync.
@@ -3278,6 +3312,11 @@ class _CashierScreenState extends ConsumerState<CashierScreen>
       ref.invalidate(dashboardCreditProvider);
       ref.invalidate(dashboardSessionsProvider);
       ref.invalidate(billsStreamProvider);
+
+      // Mirror the settle over the LAN too — a waiter's tablet that is offline
+      // right now hears nothing from the cloud socket and would keep showing
+      // the table occupied for the rest of the outage.
+      _publishBillSettled(_selectedSessionId!);
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
