@@ -2718,6 +2718,12 @@ class _CashierScreenState extends ConsumerState<CashierScreen>
       // on the waiter's screen or on a second till's copy of the bill.
       _publishKotVoided(kot.id);
       if (!voidedLocally) {
+        // No outbox op matched, but this till may still be holding a LAN
+        // MIRROR of another device's offline order — a mirror carries no op of
+        // its own by design. Drop the local copy so the bill total updates
+        // here too; the cancel still goes to the server below, because the
+        // device that took the order will upload it.
+        await LanMirror.dropKotLocally(sessionId: kot.sessionId, kotId: kot.id);
         if (ref.read(connectivityProvider)) {
           await ApiClient.instance.patch(
             ApiConstants.updateKotStatus(kot.id),
@@ -2796,7 +2802,21 @@ class _CashierScreenState extends ConsumerState<CashierScreen>
     setState(() => _processing = true);
     try {
       final voidedLocally = await _voidOfflineKotItem(kot, item);
+      final menuItemId = item['menu_item_id'] as String?;
+      // Mirror the void to the other devices, so the line disappears from the
+      // waiter's screen and from any second till's copy of the bill.
+      if (menuItemId != null) _publishKotItemVoided(kot, menuItemId);
       if (!voidedLocally && itemId != null) {
+        // As in _cancelOrder: a LAN mirror has no outbox op, so the void above
+        // found nothing. Trim the local copy or the cancelled line stays on
+        // this till's bill and keeps being charged.
+        if (menuItemId != null) {
+          await LanMirror.dropItemLocally(
+            sessionId: kot.sessionId,
+            kotId: kot.id,
+            menuItemId: menuItemId,
+          );
+        }
         final endpoint = ApiConstants.updateKotItemStatus(kot.id, itemId);
         if (ref.read(connectivityProvider)) {
           await ApiClient.instance.patch(
@@ -3149,6 +3169,20 @@ class _CashierScreenState extends ConsumerState<CashierScreen>
     ));
   }
 
+  /// Announces a voided line, so it drops off every other device's copy of
+  /// the bill rather than being charged to the guest at another till.
+  void _publishKotItemVoided(KotWithItems kot, String menuItemId) {
+    final branchId = ref.read(authNotifierProvider).value?.branchId ?? '';
+    if (branchId.isEmpty) return;
+    LanSync.instance.publish(LanMirror.kotItemVoidEnvelope(
+      deviceId: ref.read(lanConfigProvider).deviceId,
+      branchId: branchId,
+      sessionId: kot.sessionId,
+      kotId: kot.id,
+      menuItemId: menuItemId,
+    ));
+  }
+
   /// Settles a bill while OFFLINE. Saves it to the sync outbox with a client
   /// bill id, frees the table on this device, and prints a PROVISIONAL receipt
   /// (no official invoice number yet). On reconnect the sync engine replays it
@@ -3179,7 +3213,12 @@ class _CashierScreenState extends ConsumerState<CashierScreen>
           'applyVat': _applyVat,
           if (_customerName != null) 'customerName': _customerName,
           if (_customerPhone != null) 'customerPhone': _customerPhone,
-          'soldAt': now.toIso8601String(),
+          // MUST be UTC. DateTime.now().toIso8601String() emits local wall
+          // clock with no offset ("2026-07-31T21:30:00.000"); JS `new Date()`
+          // on the UTC VPS then reads that as 21:30 UTC, and the app adds
+          // Nepal's +05:45 on display — a 9:30pm bill shown as 3:15am the NEXT
+          // day, and counted on the wrong day in every report.
+          'soldAt': now.toUtc().toIso8601String(),
         },
       );
 

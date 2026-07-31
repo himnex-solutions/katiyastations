@@ -79,6 +79,22 @@ class NativeLanSync implements LanSync {
   DateTime _lastPong = DateTime.fromMillisecondsSinceEpoch(0);
   final List<_Recent> _recent = [];
 
+  /// True while a connect attempt is in flight. Part of [_isRunning] so a
+  /// config/auth rebuild landing inside the connect window can't start a
+  /// SECOND attempt alongside the first.
+  bool _connecting = false;
+
+  /// Bumped by every [stop]. Async callbacks captured under an older epoch —
+  /// a socket's onDone arriving after we already tore it down, a connect that
+  /// finally resolves after a restart — check this and do nothing.
+  ///
+  /// Without it the app flaps: an old socket's onDone fires once `stop()` has
+  /// already cleared `_client` and `start()` has reset `_stopping`, so it
+  /// clears the NEW live socket and schedules a reconnect. The hub then evicts
+  /// the peer that reconnects with the same device id, whose onDone repeats the
+  /// whole thing — a loop that never settles.
+  int _epoch = 0;
+
   @override
   LanStatus get status => _status;
 
@@ -90,8 +106,21 @@ class NativeLanSync implements LanSync {
 
   // ── Lifecycle ────────────────────────────────────────────────
 
+  /// Serialises [start] against itself. Two calls landing together would
+  /// otherwise interleave across the `await stop()` below, both conclude
+  /// nothing is running, and each open a connection — and since the hub evicts
+  /// the older peer holding the same device id, the loser's close handler tore
+  /// down the winner and the pair flapped indefinitely.
+  Future<void> _startLock = Future<void>.value();
+
   @override
-  Future<void> start({required LanConfig config, required String branchId}) async {
+  Future<void> start({required LanConfig config, required String branchId}) {
+    final next = _startLock.then((_) => _start(config, branchId));
+    _startLock = next.catchError((Object _) {});
+    return next;
+  }
+
+  Future<void> _start(LanConfig config, String branchId) async {
     // Re-running with the same settings must not tear a healthy link down —
     // this is called from a Riverpod provider that rebuilds on every auth or
     // config change.
@@ -121,6 +150,8 @@ class NativeLanSync implements LanSync {
   @override
   Future<void> stop() async {
     _stopping = true;
+    _epoch++; // everything already in flight becomes a no-op
+    _connecting = false;
     _hubTimer?.cancel();
     _clientTimer?.cancel();
     _reconnectTimer?.cancel();
@@ -155,7 +186,11 @@ class NativeLanSync implements LanSync {
     _setStatus(const LanStatus());
   }
 
-  bool get _isRunning => _server != null || _client != null || _reconnectTimer != null;
+  // _connecting matters as much as the rest: a rebuild arriving during the
+  // (up to 5s) connect window would otherwise look like "not running" and
+  // start a duplicate attempt.
+  bool get _isRunning =>
+      _server != null || _client != null || _reconnectTimer != null || _connecting;
 
   bool _sameConfig(LanConfig? a, LanConfig b) =>
       a != null &&
@@ -432,10 +467,23 @@ class NativeLanSync implements LanSync {
   // ── Client ───────────────────────────────────────────────────
 
   Future<void> _connect() async {
-    if (_stopping || _config == null || _branchId == null) return;
+    if (_stopping || _connecting || _config == null || _branchId == null) return;
     final cfg = _config!;
+    // Everything below is checked against the epoch we started under, so a
+    // restart part-way through abandons this attempt instead of racing it.
+    final epoch = _epoch;
+    _connecting = true;
+    try {
+      await _attemptConnect(cfg, epoch);
+    } finally {
+      if (epoch == _epoch) _connecting = false;
+    }
+  }
 
+  Future<void> _attemptConnect(LanConfig cfg, int epoch) async {
     final host = cfg.hasManualHost ? cfg.manualHost.trim() : await _discoverHub();
+    if (_stopping || epoch != _epoch) return;
+
     if (host == null) {
       _setStatus(LanStatus(
         role: LanRole.searching,
@@ -454,7 +502,9 @@ class NativeLanSync implements LanSync {
           '&since=$_lastSeq';
       final ws = await WebSocket.connect(url).timeout(_kConnectTimeout);
 
-      if (_stopping) {
+      // Torn down or restarted while the handshake was in flight — drop this
+      // socket rather than installing it over whatever is live now.
+      if (_stopping || epoch != _epoch) {
         await ws.close();
         return;
       }
@@ -484,11 +534,12 @@ class NativeLanSync implements LanSync {
 
       ws.listen(
         (raw) => unawaited(_onClientFrame(raw)),
-        onDone: _onClientClosed,
-        onError: (Object _) => _onClientClosed(),
+        onDone: () => _onClientClosed(ws, epoch),
+        onError: (Object _) => _onClientClosed(ws, epoch),
         cancelOnError: true,
       );
     } catch (e) {
+      if (_stopping || epoch != _epoch) return;
       if (kDebugMode) debugPrint('[LanSync] Connect to $host failed: $e');
       _setStatus(LanStatus(
         role: LanRole.searching,
@@ -513,7 +564,12 @@ class NativeLanSync implements LanSync {
     _send(ws, {'type': LanFrame.ping});
   }
 
-  void _onClientClosed() {
+  /// [closed] is the socket whose close fired. A socket we have already
+  /// replaced must not clear the live one — that is what turned a single
+  /// dropped connection into an endless connect/disconnect cycle.
+  void _onClientClosed(WebSocket closed, int epoch) {
+    if (epoch != _epoch) return; // from a previous run entirely
+    if (!identical(_client, closed) && _client != null) return; // stale socket
     _client = null;
     _clientTimer?.cancel();
     _clientTimer = null;

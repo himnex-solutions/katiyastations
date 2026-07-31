@@ -62,8 +62,11 @@ class KitchenNotifier extends StateNotifier<AsyncValue<void>> {
         ApiConstants.updateKotStatus(kotId),
         data: {
           'status': newStatus,
+          // UTC, explicitly — a bare local ISO string is re-read as UTC by the
+          // server and comes back 5h45m out (see the soldAt note in
+          // cashier_screen._settleBillOffline).
           if (newStatus == 'served')
-            'servedAt': DateTime.now().toIso8601String(),
+            'servedAt': DateTime.now().toUtc().toIso8601String(),
         },
       );
 

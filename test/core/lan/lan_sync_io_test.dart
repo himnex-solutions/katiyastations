@@ -5,6 +5,7 @@
 // waiter's offline order never reaching the till) is a transport failure. A
 // test with the transport mocked out would not have caught it.
 
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -214,6 +215,102 @@ void main() {
 
     final env = await caughtUp.timeout(const Duration(seconds: 10));
     expect((env.data['kot'] as Map)['id'], 'kot-uuid-2');
+  });
+
+  group('connection stability', () {
+    // Context: the link was dropping and re-establishing itself on its own.
+    // lanSyncProvider re-ran on every auth refresh, each run re-entered
+    // start(), and a stale socket's close handler then cleared the live one.
+    //
+    // HONEST SCOPE: these do NOT reproduce that race. Verified by reverting
+    // all three guards (start serialisation, _connecting in _isRunning, the
+    // socket-identity check in _onClientClosed) — every test below still
+    // passed. On loopback the connect window is sub-millisecond, so a rebuild
+    // can't land inside it; the real bug needs a slow LAN connect (discovery
+    // takes up to 2s) plus an auth rebuild arriving during it. Reproducing
+    // that reliably would need a delay seam injected into production code.
+    //
+    // What these DO pin down is that the guards didn't break normal
+    // operation: a repeat start() is a no-op, a real config change still
+    // reconnects, and the link still carries orders after heavy churn.
+
+    test('repeated start() with unchanged settings leaves the link alone',
+        () async {
+      await startPair();
+      await waitFor(() => hub.status.peerCount == 1, describe: 'the peer to register');
+
+      for (var i = 0; i < 10; i++) {
+        await client.start(config: clientConfig(port), branchId: _branch);
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 500));
+
+      expect(client.status.role, LanRole.client);
+      expect(hub.status.peerCount, 1, reason: 'no duplicate connections');
+    });
+
+    test('start() calls fired concurrently settle on one connection', () async {
+      await hub.start(config: hubConfig(port), branchId: _branch);
+
+      // All at once, without awaiting in between — the interleaving that used
+      // to open several sockets at the same time.
+      await Future.wait(List.generate(
+        5,
+        (_) => client.start(config: clientConfig(port), branchId: _branch),
+      ));
+
+      await waitFor(() => client.status.role == LanRole.client,
+          describe: 'the client to connect');
+      await Future<void>.delayed(const Duration(seconds: 1));
+
+      expect(hub.status.peerCount, 1);
+      expect(client.status.role, LanRole.client);
+    });
+
+    test('the link stays up and usable through repeated restarts', () async {
+      await startPair();
+
+      // Sample continuously: a flap shows up as a trip through searching.
+      final roles = <LanRole>{};
+      final ticker = Timer.periodic(
+        const Duration(milliseconds: 50),
+        (_) => roles.add(client.status.role),
+      );
+
+      for (var i = 0; i < 5; i++) {
+        await client.start(config: clientConfig(port), branchId: _branch);
+        await Future<void>.delayed(const Duration(milliseconds: 200));
+      }
+      ticker.cancel();
+
+      expect(roles, {LanRole.client}, reason: 'never dropped to searching');
+
+      // And it still actually carries an order afterwards.
+      final arrived = hub.applied.first;
+      client.publish(momoOrder(kotId: 'kot-after-churn'));
+      final env = await arrived.timeout(const Duration(seconds: 10));
+      expect((env.data['kot'] as Map)['id'], 'kot-after-churn');
+    });
+
+    test('a genuine config change still reconnects', () async {
+      await startPair();
+
+      // Changing the hub address must NOT be swallowed by the no-op guard.
+      final moved = await freePort();
+      await client.start(
+        config: LanConfig(
+          enabled: true,
+          isHub: false,
+          manualHost: '127.0.0.1',
+          port: moved,
+          deviceId: 'waiter-tablet',
+        ),
+        branchId: _branch,
+      );
+
+      expect(client.status.address, isNot('127.0.0.1:$port'));
+      await waitFor(() => hub.status.peerCount == 0,
+          describe: 'the old hub to see the peer leave');
+    });
   });
 
   test('a hub refuses a device from a different branch', () async {

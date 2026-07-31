@@ -32,7 +32,13 @@ final lanStatusProvider = StreamProvider<LanStatus>((ref) async* {
 /// providers a mirrored envelope affects.
 final lanSyncProvider = Provider<void>((ref) {
   final config = ref.watch(lanConfigProvider);
-  final branchId = ref.watch(authNotifierProvider).value?.branchId ?? '';
+  // Only the branch id matters here. Watching the whole auth state rebuilt
+  // this provider on every token refresh and profile reload, and each rebuild
+  // re-entered LanSync.start() — which is exactly the churn that made the
+  // link drop and re-establish on its own.
+  final branchId = ref.watch(
+    authNotifierProvider.select((auth) => auth.value?.branchId ?? ''),
+  );
 
   // A mirrored order arrives already written to this device's offline store, so
   // these just need re-reading. Debounced because a device reconnecting gets

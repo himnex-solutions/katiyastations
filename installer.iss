@@ -35,6 +35,7 @@ Filename: "netsh"; Parameters: "advfirewall firewall add rule name=""KATIYA Stat
 Filename: "{app}\katiya_station_rms.exe"; Description: "Launch KATIYA Station"; Flags: nowait postinstall skipifsilent
 
 [UninstallRun]
-; Leave no orphaned firewall holes behind.
-Filename: "netsh"; Parameters: "advfirewall firewall delete rule name=""KATIYA Station Local Hub (TCP)"""; Flags: runhidden
-Filename: "netsh"; Parameters: "advfirewall firewall delete rule name=""KATIYA Station Local Hub (UDP)"""; Flags: runhidden
+; Leave no orphaned firewall holes behind. RunOnceId keeps each rule from being
+; deleted repeatedly when more than one version is uninstalled.
+Filename: "netsh"; Parameters: "advfirewall firewall delete rule name=""KATIYA Station Local Hub (TCP)"""; Flags: runhidden; RunOnceId: "DelHubFirewallTCP"
+Filename: "netsh"; Parameters: "advfirewall firewall delete rule name=""KATIYA Station Local Hub (UDP)"""; Flags: runhidden; RunOnceId: "DelHubFirewallUDP"

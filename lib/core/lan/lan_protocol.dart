@@ -62,7 +62,13 @@ class LanKind {
   /// A whole order voided — payload identifies the KOT.
   static const String kotVoid = 'kot_void';
 
-  static const List<String> all = [session, kot, bill, kotVoid];
+  /// A single line voided off an order — payload identifies the KOT and the
+  /// menu item. Needed as its own kind because re-sending the trimmed KOT
+  /// can't express a removal: the mirror upserts items and would leave the
+  /// cancelled line in place.
+  static const String kotItemVoid = 'kot_item_void';
+
+  static const List<String> all = [session, kot, bill, kotVoid, kotItemVoid];
 }
 
 /// One replicated mutation travelling over the LAN.

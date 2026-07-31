@@ -161,6 +161,10 @@ export class BillingService {
         await tx.payment.create({
           data: {
             billId: created.id,
+            // Same reason as the bill above: an offline settle replays on
+            // reconnect, so without this the payment is timestamped when the
+            // internet came back rather than when the guest actually paid.
+            ...(dto.soldAt ? { createdAt: new Date(dto.soldAt) } : {}),
             method: paymentMethod,
             amount: amountPaid,
             receivedById: currentUser.userId,
@@ -185,7 +189,14 @@ export class BillingService {
 
       await tx.tableSession.update({
         where: { id: session.id },
-        data: { status: 'billed', totalAmount, closedAt: new Date() },
+        data: {
+          status: 'billed',
+          totalAmount,
+          // An offline settle closed the table when the guest left, not when
+          // the queue drained — otherwise table-turnaround reports read as if
+          // every offline session ran until the connection returned.
+          closedAt: dto.soldAt ? new Date(dto.soldAt) : new Date(),
+        },
       });
 
       // Online / call-in orders have no table to free.

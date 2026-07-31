@@ -100,6 +100,28 @@ class LanMirror {
         data: {'kotId': kotId},
       );
 
+  /// A single line voided off an order on this device. [sessionId] travels
+  /// with it because the offline store is only indexed by session.
+  static LanEnvelope kotItemVoidEnvelope({
+    required String deviceId,
+    required String branchId,
+    required String sessionId,
+    required String kotId,
+    required String menuItemId,
+  }) =>
+      LanEnvelope(
+        id: 'kotitemvoid:$kotId:$menuItemId',
+        branchId: branchId,
+        deviceId: deviceId,
+        kind: LanKind.kotItemVoid,
+        at: DateTime.now(),
+        data: {
+          'sessionId': sessionId,
+          'kotId': kotId,
+          'menuItemId': menuItemId,
+        },
+      );
+
   // ── Incoming: apply an envelope locally ──────────────────────
 
   /// Writes [env] into this device's offline store. Returns true when local
@@ -119,6 +141,8 @@ class LanMirror {
           return await _applyBill(env);
         case LanKind.kotVoid:
           return await _applyKotVoid(env);
+        case LanKind.kotItemVoid:
+          return await _applyKotItemVoid(env);
         default:
           return false;
       }
@@ -165,6 +189,65 @@ class LanMirror {
   static Future<bool> _applyKotVoid(LanEnvelope env) async {
     final kotId = env.data['kotId'] as String?;
     if (kotId == null) return false;
+    await OfflineStore.instance.deleteOfflineKot(kotId);
+    return true;
+  }
+
+  static Future<bool> _applyKotItemVoid(LanEnvelope env) async {
+    final sessionId = env.data['sessionId'] as String?;
+    final kotId = env.data['kotId'] as String?;
+    final menuItemId = env.data['menuItemId'] as String?;
+    if (sessionId == null || kotId == null || menuItemId == null) return false;
+    return dropItemLocally(
+      sessionId: sessionId,
+      kotId: kotId,
+      menuItemId: menuItemId,
+    );
+  }
+
+  // ── Local void helpers ───────────────────────────────────────
+  // Shared with the cashier screen, which needs the same edit when it voids a
+  // LAN-mirrored order: a mirror carries no outbox op, so the existing
+  // outbox-driven void path finds nothing and leaves the line on the bill.
+
+  /// Removes one menu item from a locally-stored offline KOT. Voids the whole
+  /// KOT when it was the last line. Returns false if no local copy exists —
+  /// meaning it is a server-side order to cancel through the API instead.
+  static Future<bool> dropItemLocally({
+    required String sessionId,
+    required String kotId,
+    required String menuItemId,
+  }) async {
+    final kots = await OfflineStore.instance.kotsForSession(sessionId);
+    OfflineKot? stored;
+    for (final k in kots) {
+      if (k.id == kotId) {
+        stored = k;
+        break;
+      }
+    }
+    if (stored == null) return false;
+
+    final items = await OfflineStore.instance.itemsForKot(kotId);
+    final remaining = items.where((i) => i.menuItemId != menuItemId).toList();
+
+    // delete + re-save is what actually drops the row: saveOfflineKot upserts
+    // the items it is given and leaves any others in place.
+    await OfflineStore.instance.deleteOfflineKot(kotId);
+    if (remaining.isNotEmpty) {
+      await OfflineStore.instance.saveOfflineKot(stored, remaining);
+    }
+    return true;
+  }
+
+  /// Drops a locally-stored offline KOT outright. Returns false when there was
+  /// no local copy to drop.
+  static Future<bool> dropKotLocally({
+    required String sessionId,
+    required String kotId,
+  }) async {
+    final kots = await OfflineStore.instance.kotsForSession(sessionId);
+    if (!kots.any((k) => k.id == kotId)) return false;
     await OfflineStore.instance.deleteOfflineKot(kotId);
     return true;
   }

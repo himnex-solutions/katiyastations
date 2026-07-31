@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:katiya_station_rms/core/lan/lan_mirror.dart';
 import 'package:katiya_station_rms/core/lan/lan_protocol.dart';
 
 void main() {
@@ -43,6 +44,33 @@ void main() {
       // Better to ignore an envelope we might misread than to mirror a
       // half-understood order onto the till.
       expect(LanEnvelope.tryParse(future), isNull);
+    });
+
+    test('an item void carries the session, so the receiver can find the KOT',
+        () {
+      // The offline store is only indexed by session, so a bare kotId would
+      // leave the mirror unable to locate the order it must trim.
+      final env = LanMirror.kotItemVoidEnvelope(
+        deviceId: 'cashier-pc',
+        branchId: 'branch-1',
+        sessionId: 'session-9',
+        kotId: 'kot-9',
+        menuItemId: 'menu-momo',
+      );
+
+      expect(env.kind, LanKind.kotItemVoid);
+      expect(env.data['sessionId'], 'session-9');
+      expect(env.data['kotId'], 'kot-9');
+      expect(env.data['menuItemId'], 'menu-momo');
+      // Stable id: voiding the same line twice must not double-apply.
+      expect(env.id, LanMirror.kotItemVoidEnvelope(
+        deviceId: 'other-device',
+        branchId: 'branch-1',
+        sessionId: 'session-9',
+        kotId: 'kot-9',
+        menuItemId: 'menu-momo',
+      ).id);
+      expect(LanEnvelope.tryParse(env.toJson()), isNotNull);
     });
 
     test('rejects unknown kinds and malformed payloads', () {
