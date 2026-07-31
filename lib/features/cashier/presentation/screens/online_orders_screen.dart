@@ -16,9 +16,16 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../../core/constants/app_colors.dart';
 import '../../../../core/constants/api_constants.dart';
+import '../../../../core/errors/app_exceptions.dart';
+import '../../../../core/lan/lan_config.dart';
+import '../../../../core/lan/lan_mirror.dart';
+import '../../../../core/lan/lan_sync.dart';
 import '../../../../core/network/api_client.dart';
 import '../../../../core/offline/connectivity_provider.dart';
+import '../../../../core/offline/offline_cache.dart';
 import '../../../../core/offline/offline_ids.dart';
+import '../../../../core/offline/offline_store.dart';
+import '../../../../core/offline/sync_engine.dart';
 import '../../../../core/printing/print_actions.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
 import '../../../branches/presentation/providers/branch_provider.dart';
@@ -103,16 +110,48 @@ class OnlineDraftsNotifier extends StateNotifier<List<OnlineDraft>> {
 final onlineDraftsProvider =
     StateNotifierProvider<OnlineDraftsNotifier, List<OnlineDraft>>((ref) => OnlineDraftsNotifier());
 
-/// Sent, not-yet-settled online orders (from the server).
+/// Sent, not-yet-settled online orders.
+///
+/// Offline-first: the last successful response is cached, so a dropped
+/// connection shows the outstanding orders instead of an empty list. That
+/// distinction matters — an empty list reads as "nothing to collect", and a
+/// cashier with five unpaid delivery orders would have no idea they were
+/// hidden. The response carries its KOT items, so a cached entry is enough to
+/// price, print and settle without the server.
 final onlineOrdersProvider = FutureProvider<List<Map<String, dynamic>>>((ref) async {
   final profile = ref.watch(authNotifierProvider).value;
   if (profile?.branchId == null) return [];
-  if (!ref.read(connectivityProvider)) return const [];
-  final res = await ApiClient.instance.get(
-    ApiConstants.onlineOrders,
-    queryParameters: {'branchId': profile!.branchId!},
-  );
-  return List<Map<String, dynamic>>.from(res.data as List? ?? []);
+  final branchId = profile!.branchId!;
+  final key = CacheKeys.onlineOrders(branchId);
+
+  List<dynamic> rows;
+  if (!ref.read(connectivityProvider)) {
+    final cached = await OfflineCache.instance.get(key);
+    rows = cached is List ? cached : const <dynamic>[];
+  } else {
+    try {
+      final res = await ApiClient.instance.get(
+        ApiConstants.onlineOrders,
+        queryParameters: {'branchId': branchId},
+      );
+      rows = res.data as List? ?? const <dynamic>[];
+      await OfflineCache.instance.put(key, rows);
+    } on NetworkException {
+      final cached = await OfflineCache.instance.get(key);
+      if (cached is! List) rethrow;
+      rows = cached;
+    }
+  }
+
+  final orders = List<Map<String, dynamic>>.from(rows);
+
+  // Drop anything already settled offline on this device — its bill is queued,
+  // so it is no longer awaiting payment even though the server hasn't been
+  // told yet. Without this the cashier would be shown the same order to
+  // collect on twice.
+  final settledOffline = await OfflineCache.instance.billedOfflineSessionIds();
+  if (settledOffline.isEmpty) return orders;
+  return orders.where((o) => !settledOffline.contains(o['id'] as String?)).toList();
 });
 
 /// Settled online orders — the cashier's history, server-backed so it's shared
@@ -121,12 +160,26 @@ final onlineOrdersProvider = FutureProvider<List<Map<String, dynamic>>>((ref) as
 final onlineOrderHistoryProvider = FutureProvider<List<Map<String, dynamic>>>((ref) async {
   final profile = ref.watch(authNotifierProvider).value;
   if (profile?.branchId == null) return const [];
-  if (!ref.read(connectivityProvider)) return const [];
-  final res = await ApiClient.instance.get(
-    ApiConstants.onlineOrderHistory,
-    queryParameters: {'branchId': profile!.branchId!, 'limit': '40'},
-  );
-  return List<Map<String, dynamic>>.from(res.data as List? ?? []);
+  final branchId = profile!.branchId!;
+  final key = CacheKeys.onlineOrderHistory(branchId);
+
+  if (!ref.read(connectivityProvider)) {
+    final cached = await OfflineCache.instance.get(key);
+    return cached is List ? List<Map<String, dynamic>>.from(cached) : const [];
+  }
+  try {
+    final res = await ApiClient.instance.get(
+      ApiConstants.onlineOrderHistory,
+      queryParameters: {'branchId': branchId, 'limit': '40'},
+    );
+    final rows = res.data as List? ?? const <dynamic>[];
+    await OfflineCache.instance.put(key, rows);
+    return List<Map<String, dynamic>>.from(rows);
+  } on NetworkException {
+    final cached = await OfflineCache.instance.get(key);
+    if (cached is! List) rethrow;
+    return List<Map<String, dynamic>>.from(cached);
+  }
 });
 
 // ════════════════════════════════════════════════════════════
@@ -233,9 +286,37 @@ class _OnlineOrdersScreenState extends ConsumerState<OnlineOrdersScreen> {
     List<OnlineDraft> drafts,
     AsyncValue<List<Map<String, dynamic>>> ordersAsync,
   ) {
+    final online = ref.watch(connectivityProvider);
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 96),
       children: [
+        // Say so explicitly. An unlabelled empty list offline is indis-
+        // tinguishable from "nothing to collect", which is how a cashier ends
+        // up walking away from unpaid delivery orders.
+        if (!online) ...[
+          Container(
+            margin: const EdgeInsets.only(bottom: 12),
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: AppColors.warning.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: AppColors.warning.withValues(alpha: 0.35)),
+            ),
+            child: Row(children: [
+              const Icon(Icons.wifi_off_rounded, size: 18, color: AppColors.warning),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  'No internet — showing the last known list. You can still '
+                  'settle and print; new orders can’t be sent until the '
+                  'connection returns.',
+                  style: GoogleFonts.outfit(
+                      fontSize: 12, color: AppColors.textSecondary, height: 1.4),
+                ),
+              ),
+            ]),
+          ),
+        ],
         if (drafts.isNotEmpty) ...[
           _sectionLabel('Drafts (not sent yet)'),
           ...drafts.map((d) => _DraftCard(
@@ -378,8 +459,22 @@ class _OnlineOrdersScreenState extends ConsumerState<OnlineOrdersScreen> {
     final messenger = ScaffoldMessenger.of(context);
     try {
       final sessionId = order['id'] as String;
-      final kotsRes = await ApiClient.instance.get(ApiConstants.kotsBySession(sessionId));
-      final kots = (kotsRes.data as List).cast<Map<String, dynamic>>();
+      // Reprint from the KOTs shipped with the order where possible, so this
+      // still works with no connection (the printer is on the LAN).
+      final embedded = order['kots'];
+      final List<Map<String, dynamic>> kots;
+      if (embedded is List && embedded.isNotEmpty) {
+        kots = embedded.cast<Map<String, dynamic>>();
+      } else if (!ref.read(connectivityProvider)) {
+        messenger.showSnackBar(const SnackBar(
+            backgroundColor: AppColors.warning,
+            content: Text('This order was cached before its items were saved — '
+                'reprint needs a connection.')));
+        return;
+      } else {
+        final kotsRes = await ApiClient.instance.get(ApiConstants.kotsBySession(sessionId));
+        kots = (kotsRes.data as List).cast<Map<String, dynamic>>();
+      }
       final name = (order['customer_name'] as String?) ?? 'Online';
       final phone = order['customer_phone'] as String?;
       for (final k in kots) {
@@ -1096,7 +1191,15 @@ class _SettleOnlineSheetState extends ConsumerState<_SettleOnlineSheet> {
   }
 
   /// The order's line items, flattened for the bill/receipt payload.
+  ///
+  /// Prefers the KOTs shipped with the order itself — the list endpoint sends
+  /// them, and that copy survives in the offline cache — so a settle can be
+  /// priced and printed with no connection. Falls back to fetching only when
+  /// an older cached entry predates that change.
   Future<List<Map<String, dynamic>>> _fetchItems() async {
+    final embedded = widget.order['kots'];
+    if (embedded is List && embedded.isNotEmpty) return _flattenItems(embedded);
+    if (!ref.read(connectivityProvider)) return const [];
     final itemsRes = await ApiClient.instance
         .get(ApiConstants.kotsBySession(widget.order['id'] as String));
     return _flattenItems(itemsRes.data as List);
@@ -1136,20 +1239,36 @@ class _SettleOnlineSheetState extends ConsumerState<_SettleOnlineSheet> {
   Future<void> _settle() async {
     final messenger = ScaffoldMessenger.of(context);
     setState(() => _busy = true);
+    final sessionId = widget.order['id'] as String;
+    // Client-generated, so the server's idempotency check can fire: a settle
+    // that is retried — or replayed from the outbox after being queued — can
+    // never mint a second bill and a second invoice number.
+    final billId = newOfflineId();
+    final now = DateTime.now();
+    final payload = <String, dynamic>{
+      'id': billId,
+      'paymentMethod': _method,
+      // No amountPaid: this is always a full settle, so let the server's
+      // own total be recorded as paid (avoids a client-total rounding
+      // shortfall being mis-flagged "partial paid"). discount +
+      // applyServiceCharge are sent so the server computes the same total.
+      'discount': _discount,
+      'applyServiceCharge': _applyServiceCharge,
+      if (widget.order['customer_name'] != null) 'customerName': widget.order['customer_name'],
+      if (_phone != null) 'customerPhone': _phone,
+      // UTC — see the soldAt note in cashier_screen._settleBillOffline.
+      'soldAt': now.toUtc().toIso8601String(),
+    };
+
+    if (!ref.read(connectivityProvider)) {
+      await _settleOffline(sessionId, billId, payload);
+      return;
+    }
+
     try {
       final res = await ApiClient.instance.post(
-        ApiConstants.generateBill(widget.order['id'] as String),
-        data: {
-          'paymentMethod': _method,
-          // No amountPaid: this is always a full settle, so let the server's
-          // own total be recorded as paid (avoids a client-total rounding
-          // shortfall being mis-flagged "partial paid"). discount +
-          // applyServiceCharge are sent so the server computes the same total.
-          'discount': _discount,
-          'applyServiceCharge': _applyServiceCharge,
-          if (widget.order['customer_name'] != null) 'customerName': widget.order['customer_name'],
-          if (_phone != null) 'customerPhone': _phone,
-        },
+        ApiConstants.generateBill(sessionId),
+        data: payload,
       );
       final bill = res.data as Map<String, dynamic>;
       // Print the invoice on the receipt printer (it reads the branch itself).
@@ -1166,11 +1285,82 @@ class _SettleOnlineSheetState extends ConsumerState<_SettleOnlineSheet> {
         messenger.showSnackBar(const SnackBar(
             backgroundColor: AppColors.success, content: Text('Online order settled.')));
       }
+    } on NetworkException {
+      // The connection went while we were asking. The flag is polled every 20s
+      // so it can still say "online" here — queue it rather than lose a
+      // payment that has already been taken from the customer.
+      await _settleOffline(sessionId, billId, payload);
     } catch (e) {
       if (mounted) {
         setState(() => _busy = false);
         messenger.showSnackBar(
             SnackBar(backgroundColor: AppColors.error, content: Text('Settle failed: $e')));
+      }
+    }
+  }
+
+  /// Settles with no connection: queues the bill under the client id already
+  /// generated, marks the order settled on this device so it drops off the
+  /// awaiting-payment list, and prints a PROVISIONAL receipt. The server mints
+  /// the real invoice number when the outbox drains — idempotently, so this
+  /// can never bill the order twice.
+  Future<void> _settleOffline(
+      String sessionId, String billId, Map<String, dynamic> payload) async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await OfflineStore.instance.enqueue(
+        entityType: 'bill',
+        operation: 'create',
+        endpoint: ApiConstants.generateBill(sessionId),
+        method: 'POST',
+        payload: payload,
+      );
+      await OfflineCache.instance.putBilledOfflineSession(sessionId);
+
+      // Tell the other tills over the LAN, so a second one can't collect on
+      // the same order while everyone is still offline.
+      final branchId = ref.read(authNotifierProvider).value?.branchId ?? '';
+      if (branchId.isNotEmpty) {
+        LanSync.instance.publish(LanMirror.billEnvelope(
+          deviceId: ref.read(lanConfigProvider).deviceId,
+          branchId: branchId,
+          sessionId: sessionId,
+        ));
+      }
+
+      final items = await _fetchItems();
+      if (mounted) {
+        // No invoice_number, so printBill renders this as
+        // "BILL (not a tax invoice)" — the numbered invoice follows on sync.
+        await printBillNow(context, ref, bill: {
+          'session_number': widget.order['session_number'],
+          'customer_name': widget.order['customer_name'],
+          if (_phone != null) 'customer_phone': _phone,
+          'sub_total': _subtotal,
+          'discount': _discount,
+          'service_charge': _serviceCharge,
+          'total_amount': _net,
+          'payment_method': _method,
+        }, items: items);
+      }
+
+      await ref.read(pendingSyncProvider.notifier).refresh();
+      ref.invalidate(onlineOrdersProvider);
+      ref.invalidate(onlineOrderHistoryProvider);
+      if (mounted) {
+        Navigator.pop(context);
+        messenger.showSnackBar(const SnackBar(
+          backgroundColor: AppColors.warning,
+          content: Text('Saved offline — the invoice number is assigned when '
+              'the connection returns.'),
+        ));
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _busy = false);
+        messenger.showSnackBar(SnackBar(
+            backgroundColor: AppColors.error,
+            content: Text('Failed to save offline settle: $e')));
       }
     }
   }

@@ -7,6 +7,7 @@ import 'package:intl/intl.dart';
 import '../../../../core/constants/app_colors.dart';
 import '../../../../core/constants/app_constants.dart';
 import '../../../../core/constants/api_constants.dart';
+import '../../../../core/errors/app_exceptions.dart';
 import '../../../../core/network/api_client.dart';
 import '../../../../core/lan/lan_config.dart';
 import '../../../../core/lan/lan_mirror.dart';
@@ -2714,9 +2715,6 @@ class _CashierScreenState extends ConsumerState<CashierScreen>
     setState(() => _processing = true);
     try {
       final voidedLocally = await _voidUnsyncedOfflineKot(kot.id);
-      // Tell the other devices either way: an order voided here must not stay
-      // on the waiter's screen or on a second till's copy of the bill.
-      _publishKotVoided(kot.id);
       if (!voidedLocally) {
         // No outbox op matched, but this till may still be holding a LAN
         // MIRROR of another device's offline order — a mirror carries no op of
@@ -2724,23 +2722,14 @@ class _CashierScreenState extends ConsumerState<CashierScreen>
         // here too; the cancel still goes to the server below, because the
         // device that took the order will upload it.
         await LanMirror.dropKotLocally(sessionId: kot.sessionId, kotId: kot.id);
-        if (ref.read(connectivityProvider)) {
-          await ApiClient.instance.patch(
-            ApiConstants.updateKotStatus(kot.id),
-            data: {'status': 'cancelled', 'reason': trimmed},
-          );
-        } else {
-          // Server-side order, but we're offline — queue the cancel to replay
-          // when the connection is back (the sync engine drains the outbox).
-          await OfflineStore.instance.enqueue(
-            entityType: 'kot_cancel',
-            operation: 'cancel',
-            endpoint: ApiConstants.updateKotStatus(kot.id),
-            method: 'PATCH',
-            payload: {'status': 'cancelled', 'reason': trimmed},
-          );
-        }
+        await _cancelKotOnServerOrQueue(kot.id, trimmed);
       }
+
+      // Only once the cancel is applied on the server OR durably queued do we
+      // tell the other devices. Announcing it first means a cancel that then
+      // fails has already wiped the order from every screen while the server
+      // still has it — it reappears, and gets charged, on reconnect.
+      _publishKotVoided(kot.id);
 
       // Fire the CANCELLED slip(s) to the station(s) — pass the pre-cancel item
       // list (statuses stripped inside) so the voided lines still print. This
@@ -2803,9 +2792,6 @@ class _CashierScreenState extends ConsumerState<CashierScreen>
     try {
       final voidedLocally = await _voidOfflineKotItem(kot, item);
       final menuItemId = item['menu_item_id'] as String?;
-      // Mirror the void to the other devices, so the line disappears from the
-      // waiter's screen and from any second till's copy of the bill.
-      if (menuItemId != null) _publishKotItemVoided(kot, menuItemId);
       if (!voidedLocally && itemId != null) {
         // As in _cancelOrder: a LAN mirror has no outbox op, so the void above
         // found nothing. Trim the local copy or the cancelled line stays on
@@ -2817,24 +2803,12 @@ class _CashierScreenState extends ConsumerState<CashierScreen>
             menuItemId: menuItemId,
           );
         }
-        final endpoint = ApiConstants.updateKotItemStatus(kot.id, itemId);
-        if (ref.read(connectivityProvider)) {
-          await ApiClient.instance.patch(
-            endpoint,
-            data: {'status': 'cancelled', 'reason': trimmed},
-          );
-        } else {
-          // Server-side item, but we're offline — queue the single-item cancel
-          // to replay when the connection returns.
-          await OfflineStore.instance.enqueue(
-            entityType: 'kot_item_cancel',
-            operation: 'cancel',
-            endpoint: endpoint,
-            method: 'PATCH',
-            payload: {'status': 'cancelled', 'reason': trimmed},
-          );
-        }
+        await _cancelKotItemOnServerOrQueue(kot.id, itemId, trimmed);
       }
+
+      // Announced only after the cancel is applied or queued — see the note in
+      // _cancelKotOnServerOrQueue.
+      if (menuItemId != null) _publishKotItemVoided(kot, menuItemId);
 
       // CANCELLED slip for just this line, routed to its own station.
       final profile = ref.read(authNotifierProvider).value;
@@ -3167,6 +3141,57 @@ class _CashierScreenState extends ConsumerState<CashierScreen>
       branchId: branchId,
       kotId: kotId,
     ));
+  }
+
+  /// Cancels a server-side order, falling back to the outbox when the network
+  /// turns out to be down.
+  ///
+  /// The connectivity flag is a POLLED guess — up to 20s stale while online —
+  /// so "we're online" can be wrong for the request we are about to make. This
+  /// mirrors what sendKot already does. Getting it wrong is not cosmetic: by
+  /// the time this runs the order has been dropped from the local bill, so a
+  /// cancel that is neither applied nor queued means the server still has the
+  /// order and re-supplies it the moment the connection returns.
+  Future<void> _cancelKotOnServerOrQueue(String kotId, String reason) async {
+    final endpoint = ApiConstants.updateKotStatus(kotId);
+    final payload = {'status': 'cancelled', 'reason': reason};
+    if (ref.read(connectivityProvider)) {
+      try {
+        await ApiClient.instance.patch(endpoint, data: payload);
+        return;
+      } on NetworkException {
+        // Dropped mid-request — fall through and queue it instead.
+      }
+    }
+    await OfflineStore.instance.enqueue(
+      entityType: 'kot_cancel',
+      operation: 'cancel',
+      endpoint: endpoint,
+      method: 'PATCH',
+      payload: payload,
+    );
+  }
+
+  /// Same fallback for a single voided line — see [_cancelKotOnServerOrQueue].
+  Future<void> _cancelKotItemOnServerOrQueue(
+      String kotId, String itemId, String reason) async {
+    final endpoint = ApiConstants.updateKotItemStatus(kotId, itemId);
+    final payload = {'status': 'cancelled', 'reason': reason};
+    if (ref.read(connectivityProvider)) {
+      try {
+        await ApiClient.instance.patch(endpoint, data: payload);
+        return;
+      } on NetworkException {
+        // Dropped mid-request — fall through and queue it instead.
+      }
+    }
+    await OfflineStore.instance.enqueue(
+      entityType: 'kot_item_cancel',
+      operation: 'cancel',
+      endpoint: endpoint,
+      method: 'PATCH',
+      payload: payload,
+    );
   }
 
   /// Announces a voided line, so it drops off every other device's copy of

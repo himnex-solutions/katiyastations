@@ -18,6 +18,11 @@ class CacheKeys {
   static String menuItemsByCategory(String categoryId) => 'menuItems:cat:$categoryId';
   static String menuItemsByBranch(String branchId) => 'menuItems:branch:$branchId';
   static String offlineSession(String tableId) => 'offlineSession:$tableId';
+  // Call-in / delivery orders. Cached so the till can still see (and settle)
+  // what is outstanding when the internet drops — offline this list used to
+  // come back empty, which reads identically to "nothing pending".
+  static String onlineOrders(String branchId) => 'onlineOrders:$branchId';
+  static String onlineOrderHistory(String branchId) => 'onlineOrderHistory:$branchId';
 
   static const String offlineSessionPrefix = 'offlineSession:';
 

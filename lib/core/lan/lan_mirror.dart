@@ -22,6 +22,8 @@
 // evaporates exactly when the server copy becomes authoritative.
 // ============================================================
 
+import 'dart:convert';
+
 import '../offline/offline_cache.dart';
 import '../offline/offline_store.dart';
 import 'lan_protocol.dart';
@@ -189,8 +191,62 @@ class LanMirror {
   static Future<bool> _applyKotVoid(LanEnvelope env) async {
     final kotId = env.data['kotId'] as String?;
     if (kotId == null) return false;
+    // If THIS device is the one that took the order and it hasn't uploaded
+    // yet, drop the queued create as well. Otherwise the void applies here but
+    // the create still syncs on reconnect, and the cancelled order comes back
+    // from the server — the cancel and the create racing each other through
+    // two independent outboxes.
+    await _dropQueuedCreate(kotId);
     await OfflineStore.instance.deleteOfflineKot(kotId);
     return true;
+  }
+
+  /// Removes a not-yet-uploaded `kot` create from this device's outbox, so a
+  /// voided order never reaches the server at all. No-op when the order was
+  /// never queued here (a mirror, or an order that synced online).
+  static Future<void> _dropQueuedCreate(String kotId) async {
+    final ops = await OfflineStore.instance.pendingOps();
+    for (final op in ops) {
+      if (op.entityType != 'kot' || op.operation != 'create' || op.id == null) {
+        continue;
+      }
+      try {
+        final data = jsonDecode(op.payload) as Map<String, dynamic>;
+        if (data['id'] == kotId) {
+          await OfflineStore.instance.deleteOp(op.id!);
+          return;
+        }
+      } catch (_) {/* skip a malformed queued op */}
+    }
+  }
+
+  /// Trims one line out of a not-yet-uploaded `kot` create, so a line voided
+  /// elsewhere isn't re-added when this device's order finally uploads. Drops
+  /// the whole op if that was the last line.
+  static Future<bool> _trimQueuedCreate(String kotId, String menuItemId) async {
+    final ops = await OfflineStore.instance.pendingOps();
+    for (final op in ops) {
+      if (op.entityType != 'kot' || op.operation != 'create' || op.id == null) {
+        continue;
+      }
+      try {
+        final data = jsonDecode(op.payload) as Map<String, dynamic>;
+        if (data['id'] != kotId) continue;
+        final items =
+            (data['items'] as List?)?.cast<Map<String, dynamic>>() ?? [];
+        final remaining =
+            items.where((i) => i['menuItemId'] != menuItemId).toList();
+        if (remaining.isEmpty) {
+          await OfflineStore.instance.deleteOp(op.id!);
+        } else {
+          data['items'] = remaining;
+          op.payload = jsonEncode(data);
+          await OfflineStore.instance.saveOp(op);
+        }
+        return true;
+      } catch (_) {/* skip a malformed queued op */}
+    }
+    return false;
   }
 
   static Future<bool> _applyKotItemVoid(LanEnvelope env) async {
@@ -198,11 +254,15 @@ class LanMirror {
     final kotId = env.data['kotId'] as String?;
     final menuItemId = env.data['menuItemId'] as String?;
     if (sessionId == null || kotId == null || menuItemId == null) return false;
-    return dropItemLocally(
+    // Same reasoning as _applyKotVoid: if this device still has the order
+    // queued, the voided line has to come out of the payload too.
+    final trimmedQueue = await _trimQueuedCreate(kotId, menuItemId);
+    final trimmedLocal = await dropItemLocally(
       sessionId: sessionId,
       kotId: kotId,
       menuItemId: menuItemId,
     );
+    return trimmedQueue || trimmedLocal;
   }
 
   // ── Local void helpers ───────────────────────────────────────

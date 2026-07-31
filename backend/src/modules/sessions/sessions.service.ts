@@ -99,7 +99,19 @@ export class SessionsService {
         type: 'online',
         status: { not: 'billed' },
       },
-      include: { waiter: { select: { fullName: true } } },
+      include: {
+        waiter: { select: { fullName: true } },
+        // Ship the line items with the list, the same way the history endpoint
+        // does. The till caches this response for offline use, and a settle
+        // needs the items to price and print the bill — without them the
+        // cached copy is useless the moment the connection drops, which is
+        // exactly when it matters.
+        kots: {
+          where: { status: { not: 'cancelled' } },
+          include: { items: { where: { status: { not: 'cancelled' } } } },
+          orderBy: { createdAt: 'asc' },
+        },
+      },
       orderBy: { openedAt: 'desc' },
     });
     return sessions.map(toSessionResponse);
