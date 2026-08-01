@@ -30,6 +30,15 @@ class CacheKeys {
   // and assigns the real invoice number on sync.
   static String billedOffline(String sessionId) => 'billedOffline:$sessionId';
   static const String billedOfflinePrefix = 'billedOffline:';
+
+  // An order (or one of its lines) cancelled while offline. See the tombstone
+  // note on OfflineCache below — these are what stop a cancelled order coming
+  // back from the server before the queued cancel has landed.
+  static String cancelledKot(String kotId) => 'cancelledKot:$kotId';
+  static const String cancelledKotPrefix = 'cancelledKot:';
+
+  static String cancelledItem(String itemId) => 'cancelledItem:$itemId';
+  static const String cancelledItemPrefix = 'cancelledItem:';
 }
 
 class OfflineCache {
@@ -119,6 +128,78 @@ class OfflineCache {
     const fullPrefix = '$_prefix${CacheKeys.billedOfflinePrefix}';
     for (final key in p.getKeys()) {
       if (key.startsWith(fullPrefix)) result.add(key.substring(fullPrefix.length));
+    }
+    return result;
+  }
+
+  // ── Cancelled-offline tombstones ─────────────────────────────
+  //
+  // A cancel used to leave NO local trace: the local copy was deleted and the
+  // only record was one queued API call. So the moment a refetch beat the
+  // outbox drain, the server still said "pending" and the cancelled order came
+  // straight back onto the bill — and if that queued call ever failed, it came
+  // back for good, silently.
+  //
+  // A tombstone is the missing half: the device remembers what was DELETED,
+  // not just what was added, and that memory outranks the server until the
+  // cancel is confirmed synced (SyncEngine._cleanupAfterSync clears it).
+  //
+  // Entries self-expire after [_tombstoneTtl] so a cancel that can never sync
+  // eventually surfaces the truth instead of hiding an order forever.
+  static const Duration _tombstoneTtl = Duration(hours: 24);
+
+  Future<void> putCancelledKot(String kotId) =>
+      put(CacheKeys.cancelledKot(kotId), {'at': DateTime.now().toIso8601String()});
+
+  Future<void> removeCancelledKot(String kotId) =>
+      remove(CacheKeys.cancelledKot(kotId));
+
+  /// KOT ids cancelled on this device (or mirrored in from another) whose
+  /// cancel has not yet reached the server.
+  Future<Set<String>> cancelledKotIds() =>
+      _liveTombstones(CacheKeys.cancelledKotPrefix);
+
+  Future<void> putCancelledItem(String itemId) =>
+      put(CacheKeys.cancelledItem(itemId), {'at': DateTime.now().toIso8601String()});
+
+  Future<void> removeCancelledItem(String itemId) =>
+      remove(CacheKeys.cancelledItem(itemId));
+
+  /// KOT-item ids cancelled but not yet synced.
+  Future<Set<String>> cancelledItemIds() =>
+      _liveTombstones(CacheKeys.cancelledItemPrefix);
+
+  /// Ids under [keyPrefix] that haven't aged out, sweeping expired ones away
+  /// as it goes.
+  Future<Set<String>> _liveTombstones(String keyPrefix) async {
+    final p = await _p;
+    final result = <String>{};
+    final expired = <String>[];
+    final fullPrefix = '$_prefix$keyPrefix';
+    final cutoff = DateTime.now().subtract(_tombstoneTtl);
+
+    for (final key in p.getKeys()) {
+      if (!key.startsWith(fullPrefix)) continue;
+      final id = key.substring(fullPrefix.length);
+      DateTime? at;
+      try {
+        final raw = p.getString(key);
+        if (raw != null) {
+          final decoded = jsonDecode(raw);
+          if (decoded is Map && decoded['at'] is String) {
+            at = DateTime.tryParse(decoded['at'] as String);
+          }
+        }
+      } catch (_) {/* treat as undated */}
+
+      if (at != null && at.isBefore(cutoff)) {
+        expired.add(key);
+      } else {
+        result.add(id);
+      }
+    }
+    for (final key in expired) {
+      await p.remove(key);
     }
     return result;
   }

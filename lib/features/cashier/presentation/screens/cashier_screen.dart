@@ -2808,7 +2808,7 @@ class _CashierScreenState extends ConsumerState<CashierScreen>
 
       // Announced only after the cancel is applied or queued — see the note in
       // _cancelKotOnServerOrQueue.
-      if (menuItemId != null) _publishKotItemVoided(kot, menuItemId);
+      if (menuItemId != null) _publishKotItemVoided(kot, menuItemId, itemId);
 
       // CANCELLED slip for just this line, routed to its own station.
       final profile = ref.read(authNotifierProvider).value;
@@ -3170,6 +3170,10 @@ class _CashierScreenState extends ConsumerState<CashierScreen>
       method: 'PATCH',
       payload: payload,
     );
+    // Record that THIS order is cancelled, not just that a request is queued.
+    // Without it the server's "still pending" wins on the next refetch and the
+    // order reappears on the bill before the queue has drained.
+    await OfflineCache.instance.putCancelledKot(kotId);
   }
 
   /// Same fallback for a single voided line — see [_cancelKotOnServerOrQueue].
@@ -3192,11 +3196,13 @@ class _CashierScreenState extends ConsumerState<CashierScreen>
       method: 'PATCH',
       payload: payload,
     );
+    // Same tombstone, at line level — see [_cancelKotOnServerOrQueue].
+    await OfflineCache.instance.putCancelledItem(itemId);
   }
 
   /// Announces a voided line, so it drops off every other device's copy of
   /// the bill rather than being charged to the guest at another till.
-  void _publishKotItemVoided(KotWithItems kot, String menuItemId) {
+  void _publishKotItemVoided(KotWithItems kot, String menuItemId, String? itemId) {
     final branchId = ref.read(authNotifierProvider).value?.branchId ?? '';
     if (branchId.isEmpty) return;
     LanSync.instance.publish(LanMirror.kotItemVoidEnvelope(
@@ -3205,6 +3211,7 @@ class _CashierScreenState extends ConsumerState<CashierScreen>
       sessionId: kot.sessionId,
       kotId: kot.id,
       menuItemId: menuItemId,
+      itemId: itemId,
     ));
   }
 

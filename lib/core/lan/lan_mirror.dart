@@ -104,12 +104,16 @@ class LanMirror {
 
   /// A single line voided off an order on this device. [sessionId] travels
   /// with it because the offline store is only indexed by session.
+  /// [menuItemId] locates the line in a locally-stored offline copy;
+  /// [itemId] is the server's row id, which is what a tombstone is keyed on so
+  /// the line can also be suppressed from server data.
   static LanEnvelope kotItemVoidEnvelope({
     required String deviceId,
     required String branchId,
     required String sessionId,
     required String kotId,
     required String menuItemId,
+    String? itemId,
   }) =>
       LanEnvelope(
         id: 'kotitemvoid:$kotId:$menuItemId',
@@ -121,6 +125,7 @@ class LanMirror {
           'sessionId': sessionId,
           'kotId': kotId,
           'menuItemId': menuItemId,
+          if (itemId != null) 'itemId': itemId,
         },
       );
 
@@ -168,6 +173,13 @@ class LanMirror {
     if (kotJson is! Map || itemsJson is! List) return false;
 
     final kot = OfflineKot.fromJson(Map<String, dynamic>.from(kotJson));
+
+    // Never resurrect something already cancelled here. Delivery is
+    // at-least-once, so this order can arrive again — a peer resends anything
+    // published in the last few minutes on reconnect, and a hub restart clears
+    // the dedup set that would otherwise have absorbed it.
+    final cancelled = await OfflineCache.instance.cancelledKotIds();
+    if (cancelled.contains(kot.id)) return false;
     final items = itemsJson
         .whereType<Map>()
         .map((i) => OfflineKotItem.fromJson(Map<String, dynamic>.from(i)))
@@ -198,6 +210,10 @@ class LanMirror {
     // two independent outboxes.
     await _dropQueuedCreate(kotId);
     await OfflineStore.instance.deleteOfflineKot(kotId);
+    // Hold the same tombstone the cancelling device holds, so this device also
+    // refuses to show the order if the server reports it still pending before
+    // that device's queued cancel has landed.
+    await OfflineCache.instance.putCancelledKot(kotId);
     return true;
   }
 
@@ -255,14 +271,17 @@ class LanMirror {
     final menuItemId = env.data['menuItemId'] as String?;
     if (sessionId == null || kotId == null || menuItemId == null) return false;
     // Same reasoning as _applyKotVoid: if this device still has the order
-    // queued, the voided line has to come out of the payload too.
+    // queued, the voided line has to come out of the payload too, and a
+    // tombstone keeps the server from re-supplying it in the meantime.
+    final itemId = env.data['itemId'] as String?;
+    if (itemId != null) await OfflineCache.instance.putCancelledItem(itemId);
     final trimmedQueue = await _trimQueuedCreate(kotId, menuItemId);
     final trimmedLocal = await dropItemLocally(
       sessionId: sessionId,
       kotId: kotId,
       menuItemId: menuItemId,
     );
-    return trimmedQueue || trimmedLocal;
+    return trimmedQueue || trimmedLocal || itemId != null;
   }
 
   // ── Local void helpers ───────────────────────────────────────

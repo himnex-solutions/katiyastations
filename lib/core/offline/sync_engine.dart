@@ -193,7 +193,29 @@ class SyncEngine {
       if (sessionId != null) {
         await OfflineCache.instance.removeBilledOfflineSession(sessionId);
       }
+    } else if (op.entityType == 'kot_cancel') {
+      // The server has now cancelled it, so its own copy says so — the local
+      // tombstone has done its job and can go. Cleared ONLY on success: while
+      // the cancel is still queued or retrying, the tombstone is the only
+      // thing stopping the order reappearing on the bill.
+      final kotId = _kotIdFromStatusEndpoint(op.endpoint);
+      if (kotId != null) await OfflineCache.instance.removeCancelledKot(kotId);
+    } else if (op.entityType == 'kot_item_cancel') {
+      final itemId = _itemIdFromStatusEndpoint(op.endpoint);
+      if (itemId != null) await OfflineCache.instance.removeCancelledItem(itemId);
     }
+  }
+
+  String? _kotIdFromStatusEndpoint(String endpoint) {
+    // Endpoint shape: '/kots/<kotId>/status'
+    final match = RegExp(r'/kots/([^/]+)/status$').firstMatch(endpoint);
+    return match?.group(1);
+  }
+
+  String? _itemIdFromStatusEndpoint(String endpoint) {
+    // Endpoint shape: '/kots/<kotId>/items/<itemId>/status'
+    final match = RegExp(r'/items/([^/]+)/status$').firstMatch(endpoint);
+    return match?.group(1);
   }
 
   String? _tableIdFromOpenEndpoint(String endpoint) {

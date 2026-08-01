@@ -153,6 +153,50 @@ Future<List<KotWithItems>> _offlineKotsFor(String sessionId) async {
   return result;
 }
 
+/// Re-applies locally-recorded cancels on top of what the server just sent.
+///
+/// The server is authoritative for everything EXCEPT a cancel this device has
+/// recorded but not yet managed to deliver. For that window the local fact
+/// wins: a whole tombstoned order is dropped, and tombstoned lines are removed
+/// from the orders that survive (an order left with no live lines is dropped
+/// too, exactly as cancelling its last line would).
+///
+/// Public so the tests exercise this exact function rather than a restatement
+/// of it — a copy in the test would keep passing after this one changed.
+Future<List<KotWithItems>> applyCancelTombstones(List<KotWithItems> kots) async {
+  if (kots.isEmpty) return kots;
+  final cancelledKots = await OfflineCache.instance.cancelledKotIds();
+  final cancelledItems = await OfflineCache.instance.cancelledItemIds();
+  if (cancelledKots.isEmpty && cancelledItems.isEmpty) return kots;
+
+  final result = <KotWithItems>[];
+  for (final k in kots) {
+    if (cancelledKots.contains(k.id)) continue;
+    if (cancelledItems.isEmpty) {
+      result.add(k);
+      continue;
+    }
+    final liveItems = k.items
+        .where((i) => !cancelledItems.contains(i['id'] as String?))
+        .toList();
+    if (liveItems.isEmpty) continue;
+    result.add(KotWithItems(
+      id: k.id,
+      branchId: k.branchId,
+      sessionId: k.sessionId,
+      tableId: k.tableId,
+      kotNumber: k.kotNumber,
+      status: k.status,
+      waiterId: k.waiterId,
+      waiterName: k.waiterName,
+      items: liveItems,
+      createdAt: k.createdAt,
+      notes: k.notes,
+    ));
+  }
+  return result;
+}
+
 // KOTs for a session — server data merged with any offline (pending-sync)
 // orders. Offline, the server call fails and only local orders are shown.
 final sessionKotsProvider =
@@ -177,6 +221,14 @@ final sessionKotsProvider =
       // Dropped mid-request — fall through to locally-stored orders only.
     }
   }
+  // Orders/lines cancelled here but whose cancel hasn't reached the server yet.
+  // This is the half that used to be missing: the device recorded what was
+  // ADDED offline but never what was DELETED, so a refetch that beat the
+  // outbox drain brought a cancelled order straight back onto the bill — and
+  // if the queued cancel ever failed, it came back permanently. A tombstone
+  // outranks the server until SyncEngine confirms the cancel landed.
+  serverKots = await applyCancelTombstones(serverKots);
+
   final offline = await _offlineKotsFor(sessionId);
   if (offline.isEmpty) return serverKots;
   final serverIds = serverKots.map((k) => k.id).toSet();
