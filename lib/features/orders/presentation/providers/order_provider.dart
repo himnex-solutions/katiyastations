@@ -221,32 +221,180 @@ final sessionKotsProvider =
       // Dropped mid-request — fall through to locally-stored orders only.
     }
   }
-  // Orders/lines cancelled here but whose cancel hasn't reached the server yet.
-  // This is the half that used to be missing: the device recorded what was
-  // ADDED offline but never what was DELETED, so a refetch that beat the
-  // outbox drain brought a cancelled order straight back onto the bill — and
-  // if the queued cancel ever failed, it came back permanently. A tombstone
-  // outranks the server until SyncEngine confirms the cancel landed.
-  serverKots = await applyCancelTombstones(serverKots);
+  // Write the server's answer into local storage while we can still reach it,
+  // so the till has its own copy the moment the connection goes.
+  if (serverAnswered) {
+    await _cacheServerKots(sessionId, serverKots);
+  }
 
   final offline = await _offlineKotsFor(sessionId);
-  if (offline.isEmpty) return serverKots;
   final serverIds = serverKots.map((k) => k.id).toSet();
+  final merged = [
+    ...serverKots,
+    ...offline.where((k) => !serverIds.contains(k.id)),
+  ];
 
-  // The server now has this order, so the local copy has done its job — drop
-  // it. Covers our own synced orders AND ones mirrored in over the LAN from
-  // another device, which would otherwise sit in Isar for good (they carry no
-  // outbox op of their own, so the sync engine never cleans them up).
-  if (serverAnswered) {
-    for (final k in offline) {
-      if (serverIds.contains(k.id)) {
-        unawaited(OfflineStore.instance.deleteOfflineKot(k.id));
+  // Orders/lines cancelled here but whose cancel hasn't reached the server yet.
+  // Applied to the MERGED list, because a cancelled order can be sitting in
+  // either half — freshly re-supplied by the server, or still in the local
+  // cache. A tombstone outranks both until SyncEngine confirms the cancel
+  // landed.
+  return applyCancelTombstones(merged);
+});
+
+/// Mirrors the server's answer into local storage, so it is still there when
+/// the server is not.
+///
+/// This used to DELETE every local copy the server had confirmed, reasoning
+/// that the server was now the source of truth and the local row was spent.
+/// That quietly emptied the till: while online every order was purged, so the
+/// instant the internet dropped the cashier had no server AND no cache, and
+/// the screen went blank. Offline-first is the opposite — hold a local copy of
+/// everything and let the server REFRESH it while it can be reached.
+Future<void> _cacheServerKots(
+    String sessionId, List<KotWithItems> serverKots) async {
+  final local = await OfflineStore.instance.kotsForSession(sessionId);
+  final localById = {for (final k in local) k.id: k};
+
+  for (final k in serverKots) {
+    // This provider is invalidated on every realtime event, so rewriting each
+    // order every time would mean a burst of Isar writes per KOT per refresh.
+    // Skip the ones that haven't actually changed.
+    final existing = localById[k.id];
+    if (existing != null && !existing.isPendingSync) {
+      final localItems = await OfflineStore.instance.itemsForKot(k.id);
+      if (_cacheMatches(existing, localItems, k)) continue;
+    }
+    final kot = OfflineKot()
+      ..id = k.id
+      ..branchId = k.branchId
+      ..sessionId = k.sessionId
+      ..tableId = k.tableId
+      ..kotNumber = k.kotNumber
+      ..status = k.status
+      ..waiterId = k.waiterId
+      ..waiterName = k.waiterName
+      ..createdAt = k.createdAt
+      // A cached copy of server truth — NOT something waiting to be uploaded.
+      // The distinction matters below and to the sync engine.
+      ..isPendingSync = false
+      ..syncedAt = DateTime.now();
+
+    final items = k.items
+        .map((i) => OfflineKotItem()
+          ..id = (i['id'] as String?) ?? newOfflineId()
+          ..kotId = k.id
+          ..menuItemId = (i['menu_item_id'] as String?) ?? ''
+          ..menuItemName = (i['menu_item_name'] ?? i['name'] ?? '') as String
+          ..quantity = (i['quantity'] as num?)?.toInt() ?? 0
+          ..unitPrice = (i['unit_price'] as num?)?.toDouble() ?? 0
+          ..notes = i['note'] as String?
+          ..createdAt = k.createdAt)
+        .toList();
+
+    // Delete first: saveOfflineKot upserts the items it is given and leaves
+    // any others in place, so a line cancelled server-side would otherwise
+    // survive in the cache and keep being billed offline.
+    await OfflineStore.instance.deleteOfflineKot(k.id);
+    await OfflineStore.instance.saveOfflineKot(kot, items);
+  }
+
+  // Drop cached copies the server no longer lists — cancelled or voided
+  // elsewhere. Anything still awaiting upload is left alone: it isn't stale,
+  // it simply hasn't reached the server yet.
+  final serverIds = serverKots.map((k) => k.id).toSet();
+  for (final k in local) {
+    if (!serverIds.contains(k.id) && !k.isPendingSync) {
+      await OfflineStore.instance.deleteOfflineKot(k.id);
+    }
+  }
+}
+
+/// How often the warm-up re-caches every open session's orders while online.
+const _kWarmupInterval = Duration(seconds: 90);
+
+/// Safety cap: never fan out more than this many session fetches in one pass.
+const _kWarmupSessionCap = 60;
+
+/// Keeps a local copy of the orders for EVERY open session, not just the one
+/// currently on screen.
+///
+/// `sessionKotsProvider` only caches the session a screen actually asks for,
+/// so the till was one tap away from a blank bill: drop the internet, open a
+/// table nobody had viewed while online, and there was nothing cached to show.
+/// This walks the open sessions in the background while the server is
+/// reachable, so any table can be billed once it isn't.
+///
+/// Watched once from AppShell. No-ops offline (nothing to fetch) and skips
+/// sessions whose cached copy is already current, so the repeat passes are
+/// cheap.
+final offlineOrderWarmupProvider = Provider<void>((ref) {
+  Timer? timer;
+  var running = false;
+
+  Future<void> warm() async {
+    if (running || !ref.read(connectivityProvider)) return;
+    // Upload before download, here too: fetching while the outbox still holds
+    // local edits (a quantity change, a close, a hold) would pull the server's
+    // pre-change state back over them. The drain schedules its own refresh, so
+    // skipping is safe — the next pass picks it up.
+    if (await OfflineStore.instance.pendingCount() > 0) return;
+    running = true;
+    try {
+      final sessions = await ref.read(activeSessionsStreamProvider.future);
+      for (final s in sessions.take(_kWarmupSessionCap)) {
+        if (!ref.read(connectivityProvider)) break;
+        try {
+          final response =
+              await ApiClient.instance.get(ApiConstants.kotsBySession(s.id));
+          final rows = response.data as List<dynamic>;
+          await _cacheServerKots(
+            s.id,
+            rows
+                .map((r) => _kotWithItemsFromJson(r as Map<String, dynamic>))
+                .toList(),
+          );
+        } on NetworkException {
+          break; // connection went mid-pass; the next one will catch up
+        } catch (_) {
+          // One bad session must not stop the rest being cached.
+        }
       }
+    } catch (_) {
+      // Couldn't list sessions — try again next pass.
+    } finally {
+      running = false;
     }
   }
 
-  return [...serverKots, ...offline.where((k) => !serverIds.contains(k.id))];
+  // Warm again the moment the connection returns, rather than waiting out the
+  // interval — that is exactly when the cache is most likely to be stale.
+  ref.listen<bool>(connectivityProvider, (was, isOnline) {
+    if (isOnline && was != true) unawaited(warm());
+  });
+
+  timer = Timer.periodic(_kWarmupInterval, (_) => unawaited(warm()));
+  unawaited(warm());
+
+  ref.onDispose(() => timer?.cancel());
 });
+
+/// Whether the cached copy already matches what the server just sent, so the
+/// rewrite can be skipped. Compares the fields a till actually bills on —
+/// status, ticket number, and the line quantities.
+bool _cacheMatches(
+    OfflineKot local, List<OfflineKotItem> localItems, KotWithItems server) {
+  if (local.status != server.status) return false;
+  if (local.kotNumber != server.kotNumber) return false;
+  if (localItems.length != server.items.length) return false;
+  final localQty = {for (final i in localItems) i.id: i.quantity};
+  for (final i in server.items) {
+    final id = i['id'] as String?;
+    if (id == null) return false;
+    if (localQty[id] != ((i['quantity'] as num?)?.toInt() ?? 0)) return false;
+  }
+  return true;
+}
 
 /// What a session's kitchen orders allow the waiter to do next.
 ///

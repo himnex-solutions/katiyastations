@@ -14,6 +14,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'refresh_signals.dart';
 import 'socket_client.dart';
+import '../offline/sync_engine.dart';
 import '../app_messenger.dart';
 import '../../features/auth/presentation/providers/auth_provider.dart';
 import '../../features/tables/presentation/providers/tables_provider.dart';
@@ -156,7 +157,21 @@ final realtimeSyncProvider = Provider<void>((ref) {
     // emitted while we were offline, so a KOT sent, a bill settled, or a status
     // change during the gap would otherwise be missed. Re-fetch every live
     // surface so the cashier's billing (and kitchen/tables) can never sit stale.
-    socket.onReconnected().listen((_) {
+    socket.onReconnected().listen((_) async {
+      // UPLOAD BEFORE DOWNLOAD. Anything done while the connection was gone —
+      // a cancelled order, a settled bill — is sitting in the outbox, and the
+      // server still holds the pre-change state. Refreshing first pulls that
+      // stale state back over the local change and, for a cancel, puts the
+      // order back on the bill. Draining first means the server has already
+      // been told before we ask it anything.
+      //
+      // syncNow() joins a drain already in progress rather than returning
+      // early, so this genuinely waits for the queue either way. It is
+      // best-effort: if the drain throws we still refresh, because stale
+      // screens are worse than an un-drained queue that will retry anyway.
+      try {
+        await ref.read(syncEngineProvider).syncNow();
+      } catch (_) {/* the retry timer picks it up */}
       invalidateKots();
       invalidateBilling(); // → tables, sessions, online orders too
       invalidateMenu();

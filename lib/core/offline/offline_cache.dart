@@ -39,6 +39,17 @@ class CacheKeys {
 
   static String cancelledItem(String itemId) => 'cancelledItem:$itemId';
   static const String cancelledItemPrefix = 'cancelledItem:';
+
+  // A session CLOSED offline (freed without a bill). Same idea as
+  // billedOffline: the server still shows the table occupied until the queued
+  // close syncs, so this frees it locally in the meantime.
+  static String closedOffline(String sessionId) => 'closedOffline:$sessionId';
+  static const String closedOfflinePrefix = 'closedOffline:';
+
+  // A session put on / taken off hold offline. Stores the intended state, so
+  // it can override what the server still reports.
+  static String heldOffline(String sessionId) => 'heldOffline:$sessionId';
+  static const String heldOfflinePrefix = 'heldOffline:';
 }
 
 class OfflineCache {
@@ -168,6 +179,59 @@ class OfflineCache {
   /// KOT-item ids cancelled but not yet synced.
   Future<Set<String>> cancelledItemIds() =>
       _liveTombstones(CacheKeys.cancelledItemPrefix);
+
+  // ── Sessions closed / held offline ───────────────────────────
+  // Same pattern as billedOffline: a local record of a change the server
+  // hasn't been told about yet, so the screens reflect what the staff just did
+  // instead of what the server still believes.
+
+  Future<void> putClosedOfflineSession(String sessionId) =>
+      put(CacheKeys.closedOffline(sessionId), {'at': DateTime.now().toIso8601String()});
+
+  Future<void> removeClosedOfflineSession(String sessionId) =>
+      remove(CacheKeys.closedOffline(sessionId));
+
+  /// Sessions closed offline on this device, not yet synced.
+  Future<Set<String>> closedOfflineSessionIds() =>
+      _idsWithPrefix(CacheKeys.closedOfflinePrefix);
+
+  Future<void> putHeldOfflineSession(String sessionId, bool onHold) =>
+      put(CacheKeys.heldOffline(sessionId), {
+        'onHold': onHold,
+        'at': DateTime.now().toIso8601String(),
+      });
+
+  Future<void> removeHeldOfflineSession(String sessionId) =>
+      remove(CacheKeys.heldOffline(sessionId));
+
+  /// sessionId → intended hold state, for holds not yet synced.
+  Future<Map<String, bool>> heldOfflineSessions() async {
+    final p = await _p;
+    final result = <String, bool>{};
+    const fullPrefix = '$_prefix${CacheKeys.heldOfflinePrefix}';
+    for (final key in p.getKeys()) {
+      if (!key.startsWith(fullPrefix)) continue;
+      final raw = p.getString(key);
+      if (raw == null) continue;
+      try {
+        final decoded = jsonDecode(raw);
+        if (decoded is Map && decoded['onHold'] is bool) {
+          result[key.substring(fullPrefix.length)] = decoded['onHold'] as bool;
+        }
+      } catch (_) {/* skip a malformed entry */}
+    }
+    return result;
+  }
+
+  /// Every id stored under [keyPrefix], regardless of age.
+  Future<Set<String>> _idsWithPrefix(String keyPrefix) async {
+    final p = await _p;
+    final fullPrefix = '$_prefix$keyPrefix';
+    return {
+      for (final key in p.getKeys())
+        if (key.startsWith(fullPrefix)) key.substring(fullPrefix.length),
+    };
+  }
 
   /// Ids under [keyPrefix] that haven't aged out, sweeping expired ones away
   /// as it goes.

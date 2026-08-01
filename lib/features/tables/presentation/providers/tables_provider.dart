@@ -83,6 +83,64 @@ Future<Set<String>> _billedOfflineSessions(bool online) async {
   return live;
 }
 
+/// Sessions CLOSED offline on this device and still awaiting sync. Pruned
+/// against the outbox when online, exactly like [_billedOfflineSessions] —
+/// once the close has synced the server frees the table itself.
+Future<Set<String>> _closedOfflineSessions(bool online) async {
+  final ids = await OfflineCache.instance.closedOfflineSessionIds();
+  if (ids.isEmpty || !online) return ids;
+
+  final ops = await OfflineStore.instance.pendingOps();
+  final pending = <String>{};
+  for (final op in ops) {
+    if (op.entityType != 'session_close') continue;
+    final m = RegExp(r'/sessions/([^/]+)/close').firstMatch(op.endpoint);
+    if (m != null) pending.add(m.group(1)!);
+  }
+
+  final live = <String>{};
+  for (final sid in ids) {
+    if (pending.contains(sid)) {
+      live.add(sid);
+    } else {
+      await OfflineCache.instance.removeClosedOfflineSession(sid);
+    }
+  }
+  return live;
+}
+
+/// Hold states set offline and still awaiting sync, as sessionId → onHold.
+/// Pruned against the outbox when online.
+Future<Map<String, bool>> _heldOfflineSessions(bool online) async {
+  final held = await OfflineCache.instance.heldOfflineSessions();
+  if (held.isEmpty || !online) return held;
+
+  final ops = await OfflineStore.instance.pendingOps();
+  final pending = <String>{};
+  for (final op in ops) {
+    if (op.entityType != 'session_hold') continue;
+    final m = RegExp(r'/sessions/([^/]+)/(un)?hold').firstMatch(op.endpoint);
+    if (m != null) pending.add(m.group(1)!);
+  }
+
+  final live = <String, bool>{};
+  for (final entry in held.entries) {
+    if (pending.contains(entry.key)) {
+      live[entry.key] = entry.value;
+    } else {
+      await OfflineCache.instance.removeHeldOfflineSession(entry.key);
+    }
+  }
+  return live;
+}
+
+/// Sessions no longer occupying their table on this device — settled offline
+/// or closed offline. Both free the table until the server is told.
+Future<Set<String>> _freedOfflineSessions(bool online) async => {
+      ...await _billedOfflineSessions(online),
+      ...await _closedOfflineSessions(online),
+    };
+
 final tablesStreamProvider = FutureProvider<List<RestaurantTable>>((ref) async {
   final profile = ref.watch(authNotifierProvider).value;
   if (profile?.branchId == null) return [];
@@ -132,15 +190,15 @@ final tablesStreamProvider = FutureProvider<List<RestaurantTable>>((ref) async {
     }).toList();
   }
 
-  // Free tables settled OFFLINE on this device. The server still shows them
-  // occupied until the queued bill syncs, so overlay them free here (and only
-  // here) — this is what lets the cashier close a table offline without it
-  // lingering "occupied" or being billable twice on this device.
-  final billedOffline = await _billedOfflineSessions(online);
-  if (billedOffline.isNotEmpty) {
+  // Free tables settled or closed OFFLINE on this device. The server still
+  // shows them occupied until the queued bill/close syncs, so overlay them
+  // free here — this is what lets the cashier settle or free a table offline
+  // without it lingering "occupied" or being billable twice on this device.
+  final freedOffline = await _freedOfflineSessions(online);
+  if (freedOffline.isNotEmpty) {
     tables = tables.map((t) {
       final sid = t.currentSessionId;
-      if (sid != null && billedOffline.contains(sid)) {
+      if (sid != null && freedOffline.contains(sid)) {
         return t.copyWith(status: TableStatus.available);
       }
       return t;
@@ -178,8 +236,19 @@ final activeSessionsStreamProvider = FutureProvider<List<TableSession>>((ref) as
       cachedRows = cached is List ? cached : const <dynamic>[];
     }
   }
+  // Holds set offline — the server still reports the old value until the
+  // queued hold/unhold syncs, so without this a waiter's hold appears to do
+  // nothing until the connection returns. Overlaid on the raw row (the same
+  // way offline sessions are) because TableSession has no copyWith.
+  final heldOffline = await _heldOfflineSessions(online);
+  Map<String, dynamic> withHold(Map<String, dynamic> json) {
+    final onHold = heldOffline[json['id']];
+    if (onHold == null) return json;
+    return {...json, 'on_hold': onHold};
+  }
+
   sessions = cachedRows
-      .map((r) => TableSession.fromJson(r as Map<String, dynamic>))
+      .map((r) => TableSession.fromJson(withHold(r as Map<String, dynamic>)))
       .toList();
 
   // Include sessions opened offline that the server hasn't seen yet — but only
@@ -189,17 +258,19 @@ final activeSessionsStreamProvider = FutureProvider<List<TableSession>>((ref) as
   if (offlineSessions.isNotEmpty) {
     final ids = sessions.map((s) => s.id).toSet();
     for (final json in offlineSessions.values) {
-      final s = TableSession.fromJson(json);
+      final s = TableSession.fromJson(withHold(json));
       if (!ids.contains(s.id)) sessions = [...sessions, s];
     }
   }
 
-  // Drop sessions settled offline on this device — their bill is queued, so
-  // they're no longer active here even though the server hasn't been told yet.
-  final billedOffline = await _billedOfflineSessions(online);
-  if (billedOffline.isNotEmpty) {
-    sessions = sessions.where((s) => !billedOffline.contains(s.id)).toList();
+  // Drop sessions settled or closed offline on this device — the bill/close is
+  // queued, so they're no longer active here even though the server hasn't
+  // been told yet.
+  final freedOffline = await _freedOfflineSessions(online);
+  if (freedOffline.isNotEmpty) {
+    sessions = sessions.where((s) => !freedOffline.contains(s.id)).toList();
   }
+
   return sessions;
 });
 
@@ -393,14 +464,67 @@ class TableNotifier extends StateNotifier<AsyncValue<void>> {
   Future<String?> closeSession(String tableId, String sessionId) async {
     state = const AsyncValue.loading();
     try {
-      await ApiClient.instance.post(ApiConstants.closeSession(sessionId));
-      _invalidateAll(tableId);
+      // A table opened offline that never reached the server: nothing to
+      // close. Drop the queued "open" and the local copy — sending a close for
+      // a session the server has never heard of would only 404.
+      if (await _dropUnsyncedOpenSession(tableId, sessionId)) {
+        _invalidateAll(tableId);
+        await _ref.read(pendingSyncProvider.notifier).refresh();
+        state = const AsyncValue.data(null);
+        return null;
+      }
+
+      if (_ref.read(connectivityProvider)) {
+        try {
+          await ApiClient.instance.post(ApiConstants.closeSession(sessionId));
+          _invalidateAll(tableId);
+          state = const AsyncValue.data(null);
+          return null;
+        } on NetworkException {
+          // Dropped mid-request — queue it below rather than lose the close.
+        }
+      }
+
+      await _closeSessionOffline(tableId, sessionId);
       state = const AsyncValue.data(null);
       return null;
     } catch (e) {
       state = AsyncValue.error(e.toString(), StackTrace.current);
       return e.toString();
     }
+  }
+
+  /// Frees the table locally and queues the close for replay. The server still
+  /// shows it occupied until this syncs, so the marker is what keeps the table
+  /// usable in the meantime.
+  Future<void> _closeSessionOffline(String tableId, String sessionId) async {
+    await OfflineStore.instance.enqueue(
+      entityType: 'session_close',
+      operation: 'close',
+      endpoint: ApiConstants.closeSession(sessionId),
+      method: 'POST',
+      payload: const {},
+    );
+    await OfflineCache.instance.putClosedOfflineSession(sessionId);
+    await _ref.read(pendingSyncProvider.notifier).refresh();
+    _invalidateAll(tableId);
+  }
+
+  /// Removes a still-queued "open" for [sessionId] plus its local copy.
+  /// Returns true when this was such a session.
+  Future<bool> _dropUnsyncedOpenSession(String tableId, String sessionId) async {
+    final ops = await OfflineStore.instance.pendingOps();
+    for (final op in ops) {
+      if (op.entityType != 'session' || op.id == null) continue;
+      try {
+        final data = jsonDecode(op.payload) as Map<String, dynamic>;
+        if (data['id'] != sessionId) continue;
+        await OfflineStore.instance.deleteOp(op.id!);
+        await OfflineCache.instance.removeOfflineSession(tableId);
+        return true;
+      } catch (_) {/* skip a malformed queued op */}
+    }
+    return false;
   }
 
   // ── Add Table ───────────────────────────────────────────────────────────
@@ -550,27 +674,47 @@ class TableNotifier extends StateNotifier<AsyncValue<void>> {
   }
 
   // ── Hold / Unhold Session ───────────────────────────────────────────────
-  Future<bool> holdSession(String sessionId, {String? reason}) async {
-    state = const AsyncValue.loading();
-    try {
-      await ApiClient.instance.post(
-        ApiConstants.holdSession(sessionId),
-        data: {if (reason != null) 'reason': reason},
-      );
-      _ref.invalidate(activeSessionsStreamProvider);
-      state = const AsyncValue.data(null);
-      return true;
-    } catch (e) {
-      state = AsyncValue.error(e.toString(), StackTrace.current);
-      return false;
-    }
-  }
+  Future<bool> holdSession(String sessionId, {String? reason}) =>
+      _setHold(sessionId, true, reason: reason);
 
-  Future<bool> unholdSession(String sessionId) async {
+  Future<bool> unholdSession(String sessionId) => _setHold(sessionId, false);
+
+  /// Puts a session on or off hold, offline-first: the intended state is
+  /// recorded locally (so the screens show it at once and it survives an
+  /// outage) and the call is queued when the server can't be reached.
+  Future<bool> _setHold(String sessionId, bool onHold, {String? reason}) async {
     state = const AsyncValue.loading();
+    final endpoint = onHold
+        ? ApiConstants.holdSession(sessionId)
+        : ApiConstants.unholdSession(sessionId);
+    final payload = <String, dynamic>{
+      if (onHold && reason != null) 'reason': reason,
+    };
     try {
-      await ApiClient.instance.post(ApiConstants.unholdSession(sessionId));
+      if (_ref.read(connectivityProvider)) {
+        try {
+          await ApiClient.instance.post(endpoint, data: payload);
+          _ref.invalidate(activeSessionsStreamProvider);
+          state = const AsyncValue.data(null);
+          return true;
+        } on NetworkException {
+          // Dropped mid-request — queue it rather than silently do nothing.
+        }
+      }
+
+      await OfflineStore.instance.enqueue(
+        entityType: 'session_hold',
+        operation: onHold ? 'hold' : 'unhold',
+        endpoint: endpoint,
+        method: 'POST',
+        payload: payload,
+      );
+      // Remember the INTENDED state, so the session shows as held (or not)
+      // even though the server still reports the old value.
+      await OfflineCache.instance.putHeldOfflineSession(sessionId, onHold);
+      await _ref.read(pendingSyncProvider.notifier).refresh();
       _ref.invalidate(activeSessionsStreamProvider);
+      _ref.invalidate(tablesStreamProvider);
       state = const AsyncValue.data(null);
       return true;
     } catch (e) {
@@ -641,19 +785,64 @@ class TableNotifier extends StateNotifier<AsyncValue<void>> {
   // ── Edit KOT Item (update quantity or cancel item) ────────────────────────
   Future<bool> updateKotItem(String kotItemId, int newQuantity, {String? sessionId}) async {
     try {
-      await ApiClient.instance.patch(
-        ApiConstants.updateKotItemQuantity(kotItemId),
-        data: {'quantity': newQuantity},
-      );
+      // Write the new quantity into the local copy first, so the bill is right
+      // straight away and stays right if the connection goes. Without this an
+      // offline edit was simply lost — the API call threw and nothing else
+      // recorded it.
+      await _applyLocalQuantity(sessionId, kotItemId, newQuantity);
 
-      if (sessionId != null) {
-        _ref.invalidate(sessionKotsProvider(sessionId));
+      if (_ref.read(connectivityProvider)) {
+        try {
+          await ApiClient.instance.patch(
+            ApiConstants.updateKotItemQuantity(kotItemId),
+            data: {'quantity': newQuantity},
+          );
+          _invalidateAfterItemEdit(sessionId);
+          return true;
+        } on NetworkException {
+          // Dropped mid-request — queue it below.
+        }
       }
-      _ref.invalidate(activeSessionsStreamProvider);
-      _ref.invalidate(dashboardSessionsProvider);
+
+      await OfflineStore.instance.enqueue(
+        entityType: 'kot_item_quantity',
+        operation: 'update',
+        endpoint: ApiConstants.updateKotItemQuantity(kotItemId),
+        method: 'PATCH',
+        payload: {'quantity': newQuantity},
+      );
+      await _ref.read(pendingSyncProvider.notifier).refresh();
+      _invalidateAfterItemEdit(sessionId);
       return true;
     } catch (e) {
       return false;
+    }
+  }
+
+  void _invalidateAfterItemEdit(String? sessionId) {
+    // sessionBillingProvider watches sessionKotsProvider, so the till's bill
+    // recomputes off this one invalidation.
+    if (sessionId != null) _ref.invalidate(sessionKotsProvider(sessionId));
+    _ref.invalidate(activeSessionsStreamProvider);
+    _ref.invalidate(dashboardSessionsProvider);
+  }
+
+  /// Updates the cached copy of one order line's quantity.
+  Future<void> _applyLocalQuantity(
+      String? sessionId, String kotItemId, int quantity) async {
+    if (sessionId == null) return;
+    final kots = await OfflineStore.instance.kotsForSession(sessionId);
+    for (final k in kots) {
+      final items = await OfflineStore.instance.itemsForKot(k.id);
+      final target = items.indexWhere((i) => i.id == kotItemId);
+      if (target < 0) continue;
+      items[target].quantity = quantity;
+      // delete + save: saveOfflineKot upserts the items it is handed, which is
+      // enough here, but going through delete keeps one code path for
+      // rewriting a cached order.
+      await OfflineStore.instance.deleteOfflineKot(k.id);
+      await OfflineStore.instance.saveOfflineKot(k, items);
+      return;
     }
   }
 

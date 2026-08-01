@@ -66,6 +66,10 @@ class SyncEngine {
   Timer? _retry;
   bool _disposed = false;
 
+  /// The drain currently in progress, so concurrent callers can await the same
+  /// one instead of racing past it.
+  Future<void>? _inFlight;
+
   SyncEngine(this._ref);
 
   void dispose() {
@@ -74,9 +78,35 @@ class SyncEngine {
     _retry = null;
   }
 
-  /// Replay every pending operation, oldest first. Safe to call repeatedly and
-  /// concurrently — a second call while one is running is a no-op.
-  Future<void> syncNow() async {
+  /// Replay every pending operation, oldest first.
+  ///
+  /// Awaiting this means "the outbox has been drained". A call made while a
+  /// drain is already running JOINS it rather than returning immediately —
+  /// that is what lets callers enforce upload-before-download on reconnect.
+  /// Returning early (as this used to) handed back a completed future while
+  /// the queue was still draining, so an awaiting caller would refresh from
+  /// the server and pull back the pre-change state over local edits.
+  Future<void> syncNow() {
+    final inFlight = _inFlight;
+    if (inFlight != null) return inFlight;
+
+    final completer = Completer<void>();
+    _inFlight = completer.future;
+    // The error is absorbed deliberately. A drain that throws (a provider
+    // invalidated mid-refresh, a store read failing) must not surface as an
+    // unhandled async error, and callers must still be released — the retry
+    // timer picks the queue up again either way. Individual op failures are
+    // already recorded on the op itself.
+    _drain()
+        .whenComplete(() {
+          _inFlight = null;
+          if (!completer.isCompleted) completer.complete();
+        })
+        .catchError((Object _) {});
+    return completer.future;
+  }
+
+  Future<void> _drain() async {
     if (_running || _disposed || !OfflineStore.instance.isReady) return;
     _retry?.cancel();
     _retry = null;
@@ -203,6 +233,19 @@ class SyncEngine {
     } else if (op.entityType == 'kot_item_cancel') {
       final itemId = _itemIdFromStatusEndpoint(op.endpoint);
       if (itemId != null) await OfflineCache.instance.removeCancelledItem(itemId);
+    } else if (op.entityType == 'session_close') {
+      // The server has freed the table itself now, so the local override is
+      // spent. Cleared on success only — while the close is still queued this
+      // marker is what keeps the table usable.
+      final m = RegExp(r'/sessions/([^/]+)/close').firstMatch(op.endpoint);
+      if (m != null) {
+        await OfflineCache.instance.removeClosedOfflineSession(m.group(1)!);
+      }
+    } else if (op.entityType == 'session_hold') {
+      final m = RegExp(r'/sessions/([^/]+)/(un)?hold').firstMatch(op.endpoint);
+      if (m != null) {
+        await OfflineCache.instance.removeHeldOfflineSession(m.group(1)!);
+      }
     }
   }
 

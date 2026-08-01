@@ -64,6 +64,10 @@ class AppShell extends ConsumerWidget {
     // Socket.IO, so orders taken offline on a waiter's tablet reach the
     // cashier's till over the shop's own Wi-Fi instead. No-op on web.
     ref.watch(lanSyncProvider);
+    // Keeps a local copy of EVERY open table's orders while the server is
+    // reachable — not just the one on screen — so the till can still bill a
+    // table nobody happened to open before the internet went.
+    ref.watch(offlineOrderWarmupProvider);
     // Hydrate BOTH printer setups (receipt + KOT) from storage the moment the
     // app opens / a user logs in, and keep a live reachability probe running —
     // so a correctly-configured LAN printer is connected and ready to print

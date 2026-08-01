@@ -260,7 +260,11 @@ class NativeLanSync implements LanSync {
     await _startDiscoveryResponder();
 
     _hubTimer?.cancel();
-    _hubTimer = Timer.periodic(_kHeartbeat, (_) => _sweepPeers());
+    _hubTimer = Timer.periodic(_kHeartbeat, (_) {
+      _sweepPeers();
+      // Keep the displayed address honest if DHCP moves this machine.
+      unawaited(_refreshHubAddress());
+    });
 
     final ip = await _primaryIpv4();
     _setStatus(LanStatus(
@@ -692,19 +696,78 @@ class NativeLanSync implements LanSync {
     return targets;
   }
 
+  /// Best guess at the address other devices see us on. DISPLAY ONLY — the
+  /// server binds every interface, and clients learn the real address from the
+  /// source of the discovery reply, so nothing depends on getting this right.
+  ///
+  /// Still worth getting right: a Windows till routinely carries Hyper-V, WSL
+  /// or VPN adapters alongside the real one, and "first non-loopback" picks
+  /// those about as often as not — which makes the Settings card, and the
+  /// manual-address fallback someone copies it into, actively misleading.
+  /// Score instead: real private LAN ranges win, virtual adapters and
+  /// link-local (169.254.x, what Windows assigns when DHCP never answered)
+  /// lose.
   Future<String> _primaryIpv4() async {
     try {
       final interfaces = await NetworkInterface.list(
         type: InternetAddressType.IPv4,
         includeLoopback: false,
       );
+      String? best;
+      var bestScore = -1 << 20;
       for (final ni in interfaces) {
+        final isVirtual = _virtualAdapter.hasMatch(ni.name);
         for (final addr in ni.addresses) {
-          if (!addr.isLoopback) return addr.address;
+          if (addr.isLoopback) continue;
+          final ip = addr.address;
+          var score = 0;
+          if (ip.startsWith('192.168.')) {
+            score = 40; // overwhelmingly what a restaurant router hands out
+          } else if (ip.startsWith('10.')) {
+            score = 30;
+          } else if (_isPrivate172(ip)) {
+            score = 20; // also where Docker/WSL like to sit
+          }
+          if (ip.startsWith('169.254.')) score -= 100; // DHCP never answered
+          if (isVirtual) score -= 50;
+          if (score > bestScore) {
+            bestScore = score;
+            best = ip;
+          }
         }
       }
+      if (best != null) return best;
     } catch (_) {}
     return '0.0.0.0';
+  }
+
+  static final RegExp _virtualAdapter = RegExp(
+    r'virtual|vethernet|vmware|virtualbox|vbox|hyper-?v|docker|wsl|tap|tun|vpn',
+    caseSensitive: false,
+  );
+
+  static bool _isPrivate172(String ip) {
+    final parts = ip.split('.');
+    if (parts.length != 4 || parts[0] != '172') return false;
+    final second = int.tryParse(parts[1]) ?? -1;
+    return second >= 16 && second <= 31;
+  }
+
+  /// Re-resolves the displayed address. DHCP can move the till to a different
+  /// IP mid-service, and resolving once at startup would leave Settings
+  /// showing an address that no longer exists — misleading exactly when
+  /// someone is standing there setting the site up.
+  Future<void> _refreshHubAddress() async {
+    if (_status.role != LanRole.hub || _config == null) return;
+    final address = '${await _primaryIpv4()}:${_config!.port}';
+    if (address == _status.address) return;
+    _setStatus(LanStatus(
+      role: LanRole.hub,
+      address: address,
+      peerCount: _peers.length,
+      received: _received,
+      detail: _status.detail,
+    ));
   }
 
   // ── Shared ───────────────────────────────────────────────────
