@@ -6,6 +6,7 @@
 // Only compiled where dart:io exists (see thermal_printer.dart).
 // ============================================================
 
+import 'dart:async' show TimeoutException;
 import 'dart:io' show Platform, Socket, SocketException;
 
 import 'package:connectivity_plus/connectivity_plus.dart';
@@ -22,6 +23,27 @@ ThermalPrinter createThermalPrinter() => _IoThermalPrinter();
 
 /// Amounts on a receipt always carry both decimals, thousands separated.
 final NumberFormat _money2 = NumberFormat('#,##0.00');
+
+// ── network transport budgets ───────────────────────────────
+//
+// A print is a foreground action a waiter is stood waiting on, so every step is
+// bounded: it is far better to say "that didn't print" in a few seconds than to
+// freeze the Send button on a printer that is switched off.
+
+/// Opening the connection. A printer on the same LAN answers in milliseconds;
+/// anything past this is off, unplugged, or on the wrong IP.
+const Duration _kTcpConnectTimeout = Duration(seconds: 5);
+
+/// Getting the ticket onto the wire.
+const Duration _kTcpWriteTimeout = Duration(seconds: 10);
+
+/// Best-effort graceful close after the bytes are away. Bounded because some
+/// print servers never close their own end, and a print must not stall on it.
+const Duration _kTcpCloseGrace = Duration(seconds: 2);
+
+/// Connect budget for a status probe. Shorter than a real print: this one is
+/// answering a question, not delivering an order.
+const Duration _kProbeTimeout = Duration(seconds: 2);
 
 class _IoThermalPrinter implements ThermalPrinter {
   final _manager = PrinterManager.instance;
@@ -125,21 +147,14 @@ class _IoThermalPrinter implements ThermalPrinter {
 
   /// Opens a TCP connection and drops it immediately — proves the printer is
   /// listening on :port without sending a single byte of ESC/POS.
+  ///
+  /// The slot is handed back before anything else runs. A cheap ESC/POS print
+  /// server has one session, so holding it even for the length of a
+  /// connectivity lookup is time the kitchen ticket behind us cannot connect.
   Future<PrinterProbe> _probeNetwork(PrinterConfig cfg) async {
+    Socket? socket;
     try {
-      final socket = await Socket.connect(
-        cfg.address,
-        cfg.port,
-        timeout: const Duration(seconds: 2),
-      );
-      socket.destroy();
-      return PrinterProbe(
-        state: PrinterLinkState.connected,
-        kind: cfg.kind,
-        transport: 'Network · ${await _linkKind()}',
-        detail: '${cfg.address}:${cfg.port}',
-        checkedAt: DateTime.now(),
-      );
+      socket = await Socket.connect(cfg.address, cfg.port, timeout: _kProbeTimeout);
     } on SocketException catch (e) {
       // Socket.connect surfaces a timeout as a SocketException too.
       return PrinterProbe(
@@ -149,7 +164,17 @@ class _IoThermalPrinter implements ThermalPrinter {
         detail: '${cfg.address}:${cfg.port} — ${e.message}',
         checkedAt: DateTime.now(),
       );
+    } finally {
+      socket?.destroy();
     }
+
+    return PrinterProbe(
+      state: PrinterLinkState.connected,
+      kind: cfg.kind,
+      transport: 'Network · ${await _linkKind()}',
+      detail: '${cfg.address}:${cfg.port}',
+      checkedAt: DateTime.now(),
+    );
   }
 
   /// Describes how *this device* reaches the LAN. The printer itself is just
@@ -242,15 +267,69 @@ class _IoThermalPrinter implements ThermalPrinter {
 
   // ── transport ─────────────────────────────────────────────
   Future<void> _send(PrinterConfig cfg, List<int> bytes) async {
+    // Network printers get their own socket handling — see [_sendOverTcp].
+    if (cfg.kind == PrinterKind.network) return _sendOverTcp(cfg, bytes);
+
     final type = _type(cfg.kind);
     final connected = await _manager.connect(type: type, model: _model(cfg));
     if (!connected) {
       throw Exception('Could not connect to the printer (${cfg.target})');
     }
-    await _manager.send(type: type, bytes: bytes);
-    // Network sockets are one-shot; close so the next print reconnects cleanly.
-    if (type == PrinterType.network) {
-      await _manager.disconnect(type: type);
+    // USB and Bluetooth stay connected on purpose: the plugin's connect()
+    // claims the device, and re-claiming it per ticket fights an in-flight
+    // print. Their send() still reports whether the bytes were taken, and that
+    // answer used to be thrown away — a printer that was out of paper or
+    // asleep reported a successful print to the waiter.
+    if (!await _manager.send(type: type, bytes: bytes)) {
+      throw Exception(
+          'The printer (${cfg.target}) did not accept the ticket. Check it is '
+          'on, has paper, and is still connected.');
+    }
+  }
+
+  /// Writes [bytes] to a network printer over a connection opened for this one
+  /// ticket and always handed back, whatever happens.
+  ///
+  /// This deliberately bypasses PrinterManager's TCP connector, which cannot be
+  /// used safely: it keeps a single socket on a process-wide singleton, its
+  /// `disconnect()` is a no-op (the `destroy()` is commented out upstream), and
+  /// it only closes the socket on the success path. So every failed write left
+  /// a connection open that nothing would ever reclaim — and since these print
+  /// servers have one session slot, a handful of failures took the printer off
+  /// the network until someone power-cycled it.
+  Future<void> _sendOverTcp(PrinterConfig cfg, List<int> bytes) async {
+    Socket? socket;
+    try {
+      socket = await Socket.connect(cfg.address, cfg.port, timeout: _kTcpConnectTimeout);
+
+      // Nothing is expected back, but an un-listened socket turns a reset from
+      // the printer into an unhandled async error, and unread bytes sitting in
+      // the receive buffer at close time make the OS tear the connection down
+      // abortively — which truncates the tail of the ticket. Drain and ignore.
+      socket.listen((_) {}, onError: (Object _) {}, cancelOnError: false);
+
+      socket.add(bytes);
+      await socket.flush().timeout(_kTcpWriteTimeout);
+
+      // Half-close so the printer sees a clean end of job. Best effort: flush()
+      // already put the ticket on the wire, so a printer that never closes its
+      // own end must not hold up the next order.
+      try {
+        await socket.close().timeout(_kTcpCloseGrace, onTimeout: () => null);
+      } catch (_) {
+        // Already delivered — a messy teardown is not a failed print.
+      }
+    } on SocketException catch (e) {
+      throw Exception(
+          'Could not reach the printer at ${cfg.target} — ${e.message}');
+    } on TimeoutException {
+      throw Exception(
+          'The printer at ${cfg.target} took the connection but stopped '
+          'reading. The ticket may have printed only in part.');
+    } finally {
+      // The one line the plugin was missing. Runs on every path, including the
+      // failures, so a bad print costs nothing that isn't given straight back.
+      socket?.destroy();
     }
   }
 

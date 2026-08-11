@@ -12,6 +12,7 @@ import '../../../../core/offline/connectivity_provider.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
 import 'package:katiya_station_rms/features/cashier/domain/entities/bill_entities.dart';
 import '../../../../core/widgets/notification_bell.dart';
+import '../../../../core/widgets/purge_payments_dialog.dart';
 
 final billsStreamProvider =
     FutureProvider.family<List<Bill>, DateTimeRange?>((ref, range) async {
@@ -145,6 +146,17 @@ class _PaymentHistoryScreenState extends ConsumerState<PaymentHistoryScreen> {
           ),
           if (_range != null)
             IconButton(icon: const Icon(Icons.close, size: 18), onPressed: () => setState(() => _range = null)),
+          // Managers only: permanently clear a date range of payment records.
+          // Kept off the main row as an overflow item — it is a rare
+          // maintenance action, and a delete button sitting next to a date
+          // filter is a delete button someone eventually taps by accident.
+          if (ref.watch(authNotifierProvider).value?.role == 'branch_manager')
+            IconButton(
+              tooltip: 'Delete payment records by date',
+              icon: const Icon(Icons.delete_sweep_rounded,
+                  size: 20, color: AppColors.error),
+              onPressed: _purgeRecords,
+            ),
           const NotificationBell(),
         ],
       ),
@@ -268,6 +280,24 @@ class _PaymentHistoryScreenState extends ConsumerState<PaymentHistoryScreen> {
   Future<void> _pickRange() async {
     final picked = await showDateRangePicker(context: context, firstDate: DateTime(2024), lastDate: DateTime.now(), initialDateRange: _range);
     if (picked != null) setState(() => _range = picked);
+  }
+
+  /// Permanently deletes a date range of payment records for this branch. The
+  /// dialog shows what is inside the range before anything is removed.
+  Future<void> _purgeRecords() async {
+    final branchId = ref.read(authNotifierProvider).value?.branchId;
+    if (branchId == null) return;
+    final messenger = ScaffoldMessenger.of(context);
+
+    final deleted = await showPurgePaymentsDialog(context, branchId: branchId);
+    if (deleted == null || !mounted) return;
+
+    // The list on screen is now describing bills that no longer exist.
+    ref.invalidate(billsStreamProvider);
+    messenger.showSnackBar(SnackBar(
+      backgroundColor: AppColors.success,
+      content: Text('$deleted payment record(s) deleted permanently.'),
+    ));
   }
 
   /// Collect the outstanding balance on a part-settled bill. On success the

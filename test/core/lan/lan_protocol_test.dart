@@ -73,6 +73,68 @@ void main() {
       expect(LanEnvelope.tryParse(env.toJson()), isNotNull);
     });
 
+    test('a print job survives the wire, so the hub can act on it', () {
+      final env = LanMirror.printJobEnvelope(
+        deviceId: 'waiter-tablet',
+        branchId: 'branch-1',
+        role: LanPrintRole.kitchen,
+        jobId: 'kot-9',
+        ticket: {
+          'kotNumber': 'OFF-3F9A',
+          'items': [
+            {'name': 'Chicken Momo', 'quantity': 2}
+          ],
+        },
+      );
+
+      final parsed = LanEnvelope.tryParse(env.toJson());
+      expect(parsed, isNotNull);
+      expect(parsed!.kind, LanKind.printJob);
+      expect(parsed.data['role'], LanPrintRole.kitchen);
+      expect((parsed.data['ticket'] as Map)['kotNumber'], 'OFF-3F9A');
+    });
+
+    test('the same ticket published twice carries one id, so it prints once',
+        () {
+      LanEnvelope job(String device) => LanMirror.printJobEnvelope(
+            deviceId: device,
+            branchId: 'branch-1',
+            role: LanPrintRole.kitchen,
+            jobId: 'kot-9',
+            ticket: const {'kotNumber': 'OFF-3F9A'},
+          );
+
+      // Delivery is at-least-once by design: a tablet re-sends anything
+      // published in the last few minutes when it reconnects. The id is the
+      // only thing stopping the kitchen cooking that order a second time, so
+      // it must not drift with the clock or the sending device.
+      expect(job('waiter-tablet').id, job('another-tablet').id);
+      expect(job('waiter-tablet').id, 'print:kitchen:kot-9');
+    });
+
+    test('the two halves of one order are separate jobs on separate printers',
+        () {
+      // Food goes to the kitchen and drinks to the bar. Keyed on the KOT alone
+      // these would collapse into one id and the second ticket would be
+      // swallowed as a duplicate.
+      final kitchen = LanMirror.printJobEnvelope(
+        deviceId: 'waiter-tablet',
+        branchId: 'branch-1',
+        role: LanPrintRole.kitchen,
+        jobId: 'kot-9',
+        ticket: const {'kotNumber': 'OFF-3F9A'},
+      );
+      final bar = LanMirror.printJobEnvelope(
+        deviceId: 'waiter-tablet',
+        branchId: 'branch-1',
+        role: LanPrintRole.receipt,
+        jobId: 'kot-9:bar',
+        ticket: const {'kotNumber': 'OFF-3F9A'},
+      );
+
+      expect(kitchen.id, isNot(bar.id));
+    });
+
     test('rejects unknown kinds and malformed payloads', () {
       expect(LanEnvelope.tryParse(sample().toJson()..['kind'] = 'nonsense'), isNull);
       expect(LanEnvelope.tryParse(sample().toJson()..remove('branchId')), isNull);

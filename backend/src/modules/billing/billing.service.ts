@@ -12,6 +12,7 @@ import { GenerateBillDto } from './dto/generate-bill.dto';
 import { UpdateBillDto } from './dto/update-bill.dto';
 import { AddPaymentDto } from './dto/add-payment.dto';
 import { RefundBillDto } from './dto/refund-bill.dto';
+import { PaymentPurgeRangeDto, PurgePaymentsDto } from './dto/purge-payments.dto';
 import { CurrentUserPayload } from '../../common/decorators/current-user.decorator';
 import { resolveBranchScope } from '../../common/utils/branch-scope.util';
 import { buildPaginationMeta } from '../../common/dto/pagination.dto';
@@ -22,6 +23,19 @@ import { nextSequenceNumber } from '../../common/utils/sequence.util';
  * they can void/refund a bill they just settled — alongside managers and the
  * accountant who owns the books. */
 const REFUND_ROLES = ['branch_manager', 'accountant', 'cashier'];
+
+/**
+ * The ONLY bill state a purge may remove: settled in full, in cash or card, and
+ * never reversed.
+ *
+ * Everything else is deliberately untouchable. 'credit' is money still on the
+ * books — and because CreditRecord rows exist only for credit sales, excluding
+ * this status is also what guarantees no credit record is ever cascaded away by
+ * a purge. 'partial_paid' is a balance someone still owes; 'refunded' and
+ * 'voided' are the audit trail of money given back, which is exactly the
+ * history a deletion tool must not be able to quietly remove.
+ */
+const PURGEABLE_PAYMENT_STATUS = 'paid';
 
 @Injectable()
 export class BillingService {
@@ -367,5 +381,170 @@ export class BillingService {
 
   paymentHistory(currentUser: CurrentUserPayload, filter: BranchFilterDto) {
     return this.findAll(currentUser, filter);
+  }
+
+  // ── Purging payment records ──────────────────────────────────
+  //
+  // Managers and the super admin can permanently remove a window of settled
+  // bills. This is deliberately irreversible: the caller asked for the records
+  // to be gone, not hidden. What survives is an audit row holding the header of
+  // every bill removed, so "who cleared the 12th, and what was in it" still has
+  // an answer months later.
+
+  /**
+   * Resolves the branch and window a purge applies to, refusing anything
+   * ambiguous. A super admin's token carries no branch, so an unscoped call
+   * would otherwise mean "every branch at once" — never an implied default for
+   * something that deletes settled money.
+   *
+   * Returns two filters: [window] is everything in range, [where] is the subset
+   * that may actually be deleted. Both are needed so the preview can say what
+   * is being kept and why.
+   */
+  private purgeScope(currentUser: CurrentUserPayload, dto: PaymentPurgeRangeDto) {
+    const branchId = resolveBranchScope(currentUser, dto.branchId);
+    if (!branchId) {
+      throw new BadRequestException(
+        'Choose a branch. A purge is never applied to every branch at once.',
+      );
+    }
+
+    const start = new Date(dto.startDate);
+    const end = new Date(dto.endDate);
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+      throw new BadRequestException('That date range could not be read.');
+    }
+    if (end <= start) {
+      throw new BadRequestException('The end of the range must come after the start.');
+    }
+
+    const window = { branchId, createdAt: { gte: start, lt: end } };
+
+    return {
+      branchId,
+      start,
+      end,
+      window,
+      where: { ...window, paymentStatus: PURGEABLE_PAYMENT_STATUS },
+    };
+  }
+
+  /**
+   * Everything the caller is about to destroy, counted and totalled, so the
+   * confirmation can state it in words before a single row is removed. Reads
+   * only — safe to call as often as the date picker changes.
+   */
+  async previewPaymentPurge(currentUser: CurrentUserPayload, dto: PaymentPurgeRangeDto) {
+    const { branchId, start, end, window, where } = this.purgeScope(currentUser, dto);
+
+    const [bills, totals, taxInvoices, payments, billsInRange, keptByStatus] =
+      await Promise.all([
+        this.prisma.bill.count({ where }),
+        this.prisma.bill.aggregate({ where, _sum: { totalAmount: true } }),
+        this.prisma.bill.count({ where: { ...where, invoiceNumber: { not: null } } }),
+        this.prisma.payment.count({ where: { bill: where } }),
+        this.prisma.bill.count({ where: window }),
+        // What the filter is holding back, broken down so the manager can see
+        // WHY 40 bills in the range became 31 deletions instead of guessing
+        // that something went wrong.
+        this.prisma.bill.groupBy({
+          by: ['paymentStatus'],
+          where: { ...window, paymentStatus: { not: PURGEABLE_PAYMENT_STATUS } },
+          _count: { _all: true },
+        }),
+      ]);
+
+    return {
+      branchId,
+      startDate: start.toISOString(),
+      endDate: end.toISOString(),
+      bills,
+      payments,
+      taxInvoices,
+      totalAmount: totals._sum.totalAmount?.toString() ?? '0',
+      billsInRange,
+      kept: keptByStatus.map((row) => ({
+        status: row.paymentStatus,
+        count: row._count._all,
+      })),
+    };
+  }
+
+  /**
+   * Permanently deletes the FULLY-PAID bills in a window, along with the
+   * payment rows the database cascades with them. Credit, part-paid, refunded
+   * and voided bills in the same window are left exactly where they are — see
+   * [PURGEABLE_PAYMENT_STATUS].
+   */
+  async purgePayments(currentUser: CurrentUserPayload, dto: PurgePaymentsDto) {
+    const { branchId, start, end, where } = this.purgeScope(currentUser, dto);
+
+    // Read the headers before deleting: once the rows are gone this is the only
+    // description of them that exists anywhere.
+    const bills = await this.prisma.bill.findMany({
+      where,
+      select: {
+        id: true,
+        billNumber: true,
+        invoiceNumber: true,
+        totalAmount: true,
+        amountPaid: true,
+        paymentMethod: true,
+        paymentStatus: true,
+        cashierName: true,
+        customerName: true,
+        createdAt: true,
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    if (bills.length === 0) {
+      throw new NotFoundException(
+        'There are no fully-paid payment records in that range. Credit, '
+        + 'part-paid, refunded and voided bills are never removed.',
+      );
+    }
+
+    const billIds = bills.map((bill) => bill.id);
+    const payments = await this.prisma.payment.count({
+      where: { billId: { in: billIds } },
+    });
+
+    const { count } = await this.prisma.bill.deleteMany({ where });
+
+    this.auditLogs.record({
+      branchId,
+      userId: currentUser.userId,
+      action: 'payment_records_purged',
+      tableName: 'bills',
+      oldValues: {
+        startDate: start.toISOString(),
+        endDate: end.toISOString(),
+        paymentStatus: PURGEABLE_PAYMENT_STATUS,
+        bills: count,
+        payments,
+        // Every header, not a sample: a purge is precisely the case where
+        // "which ones?" is the question, and a bill header is a few hundred
+        // bytes. Amounts are stringified because Prisma Decimal does not
+        // survive JSON.stringify as a number.
+        removed: bills.map((bill) => ({
+          ...bill,
+          totalAmount: bill.totalAmount.toString(),
+          amountPaid: bill.amountPaid.toString(),
+          createdAt: bill.createdAt.toISOString(),
+        })),
+      },
+    });
+
+    // Any till or report still showing this window is now wrong.
+    this.realtime.dataChanged(branchId, 'bills', 'purged');
+
+    return {
+      deleted: count,
+      payments,
+      branchId,
+      startDate: start.toISOString(),
+      endDate: end.toISOString(),
+    };
   }
 }

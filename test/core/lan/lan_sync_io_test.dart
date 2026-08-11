@@ -74,6 +74,25 @@ LanEnvelope momoOrder({
   return LanMirror.kotEnvelope(deviceId: deviceId, kot: kot, items: items);
 }
 
+/// A kitchen ticket a waiter's tablet hands to the hub, which owns the printer.
+LanEnvelope printJob({
+  String kotId = 'kot-uuid-1',
+  String deviceId = 'waiter-tablet',
+}) =>
+    LanMirror.printJobEnvelope(
+      deviceId: deviceId,
+      branchId: _branch,
+      role: LanPrintRole.kitchen,
+      jobId: kotId,
+      ticket: {
+        'kotNumber': 'OFF-3F9A',
+        'tableNumber': '7',
+        'items': [
+          {'name': 'Chicken Momo', 'quantity': 2}
+        ],
+      },
+    );
+
 /// Waits for [check] to hold, polling rather than sleeping a fixed time so the
 /// tests stay fast on a quick machine and reliable on a slow one.
 Future<void> waitFor(
@@ -183,6 +202,61 @@ void main() {
 
     expect(onOther.single.data['kot'], isNotNull);
     expect(onSender, isEmpty, reason: 'the origin already has this order locally');
+  });
+
+  test('a print job reaches the hub and no other device', () async {
+    await startPair();
+
+    final other = NativeLanSync();
+    addTearDown(other.stop);
+    await other.start(
+      config: clientConfig(port, deviceId: 'waiter-tablet-2'),
+      branchId: _branch,
+    );
+    await waitFor(() => other.status.role == LanRole.client,
+        describe: 'the second waiter to connect');
+
+    final onHub = <LanEnvelope>[];
+    final onOther = <LanEnvelope>[];
+    final subHub = hub.applied.listen(onHub.add);
+    final subOther = other.applied.listen(onOther.add);
+
+    client.publish(printJob());
+
+    await waitFor(() => onHub.isNotEmpty, describe: 'the ticket to reach the hub');
+    await Future<void>.delayed(const Duration(milliseconds: 300));
+    await subHub.cancel();
+    await subOther.cancel();
+
+    expect(onHub.single.kind, LanKind.printJob);
+    expect(onHub.single.data['role'], LanPrintRole.kitchen);
+    // The hub owns the printers. Fanning a ticket out to the other tablets
+    // would have every device that can print put the same order on paper.
+    expect(onOther, isEmpty,
+        reason: 'a print job is addressed to the hub alone');
+  });
+
+  test('a tablet that reconnects does not have its old tickets reprinted',
+      () async {
+    await startPair();
+
+    final onHub = <LanEnvelope>[];
+    final sub = hub.applied.listen(onHub.add);
+
+    client.publish(printJob());
+    await waitFor(() => onHub.isNotEmpty, describe: 'the ticket to reach the hub');
+
+    // The waiter's tablet drops off and comes back — it re-sends everything it
+    // published in the last few minutes, because a frame lost mid-blip is
+    // never acknowledged by anyone. The kitchen must not cook it twice.
+    await client.stop();
+    await client.start(config: clientConfig(port), branchId: _branch);
+    await waitFor(() => client.status.role == LanRole.client,
+        describe: 'the waiter to reconnect');
+    await Future<void>.delayed(const Duration(milliseconds: 400));
+    await sub.cancel();
+
+    expect(onHub, hasLength(1));
   });
 
   test('a device that was away catches up on what it missed', () async {

@@ -23,10 +23,13 @@ class LanConfig {
   /// True on the one device that hosts the hub (the cashier PC).
   final bool isHub;
 
-  /// Manually pinned hub address. Empty means auto-discover by UDP broadcast.
-  /// Kept because DHCP-flaky sites and locked-down networks that drop
-  /// broadcasts still need a way in — the same escape hatch the LAN printer
-  /// setup already gives users.
+  /// The hub address this device dials. Defaults to [kDefaultHubHost], the
+  /// cashier PC's reserved IP, so a tablet connects to a known machine instead
+  /// of broadcasting to find one.
+  ///
+  /// Empty means auto-discover by UDP broadcast. That is now the deliberate
+  /// choice rather than the default: a site whose cashier PC has no fixed
+  /// address can clear this field and go back to broadcasting.
   final String manualHost;
 
   final int port;
@@ -38,7 +41,7 @@ class LanConfig {
   const LanConfig({
     this.enabled = true,
     this.isHub = false,
-    this.manualHost = '',
+    this.manualHost = kDefaultHubHost,
     this.port = kLanHubPort,
     this.deviceId = '',
   });
@@ -87,7 +90,10 @@ class LanConfigNotifier extends StateNotifier<LanConfig> {
     state = LanConfig(
       enabled: p.getBool(_kEnabled) ?? true,
       isHub: p.getBool(_kIsHub) ?? false,
-      manualHost: p.getString(_kManualHost) ?? '',
+      // Absent key → the site default. A key that IS present is honoured even
+      // when empty: that is somebody having deliberately cleared the field to
+      // go back to broadcast discovery, and a default must not overrule it.
+      manualHost: p.getString(_kManualHost) ?? kDefaultHubHost,
       port: p.getInt(_kPort) ?? kLanHubPort,
       deviceId: deviceId,
     );

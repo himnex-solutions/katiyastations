@@ -10,8 +10,8 @@ import '../../router/app_router.dart';
 import '../lan/lan_sync_provider.dart';
 import '../network/realtime_sync.dart';
 import '../printing/kot_auto_print.dart';
+import '../printing/lan_print_station.dart';
 import '../printing/printer_config.dart';
-import '../printing/printer_status.dart';
 import '../offline/connectivity_provider.dart';
 import '../../features/orders/presentation/providers/order_provider.dart';
 import 'offline_banner.dart';
@@ -69,13 +69,23 @@ class AppShell extends ConsumerWidget {
     // table nobody happened to open before the internet went.
     ref.watch(offlineOrderWarmupProvider);
     // Hydrate BOTH printer setups (receipt + KOT) from storage the moment the
-    // app opens / a user logs in, and keep a live reachability probe running —
-    // so a correctly-configured LAN printer is connected and ready to print
-    // without anyone opening Settings first. No-op on web / when unconfigured.
+    // app opens / a user logs in. These loads are async, so without warming
+    // them here the first KOT of the day reads a config that still says
+    // "not configured" and silently doesn't print. No-op on web.
+    //
+    // Their live reachability probes are deliberately NOT started here. Every
+    // probe opens a real TCP connection to the printer, and running two of them
+    // on every screen for a whole session meant six devices opening ~36
+    // connections a minute against a print server that has a single session
+    // slot — which is what took both printers off the network mid-service. The
+    // status pill and the Settings card each start a probe while they are on
+    // screen; nothing else needs one.
     ref.watch(receiptPrinterConfigProvider);
     ref.watch(kotPrinterConfigProvider);
-    ref.watch(receiptPrinterStatusProvider);
-    ref.watch(kotPrinterStatusProvider);
+    // On the cashier PC ("act as local hub") this listens for the tickets the
+    // waiters' tablets publish and drives both printers on their behalf, one
+    // ticket at a time. Inert on every other device.
+    ref.watch(lanPrintStationProvider);
     final profileAsync = ref.watch(authNotifierProvider);
     final profile = profileAsync.value;
     // While online, pre-download every menu image so ALL of them show offline

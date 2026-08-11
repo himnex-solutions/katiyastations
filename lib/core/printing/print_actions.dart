@@ -9,6 +9,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../constants/app_colors.dart';
+import '../lan/lan_config.dart';
+import '../lan/lan_mirror.dart';
+import '../lan/lan_sync.dart';
+import '../../features/auth/presentation/providers/auth_provider.dart';
 import '../../features/branches/presentation/providers/branch_provider.dart';
 import '../../features/orders/domain/entities/order_entities.dart';
 import 'printer_config.dart';
@@ -83,13 +87,38 @@ Future<void> printBillNow(
   }
 }
 
-/// Reprints a kitchen ticket on this device's KOT (kitchen) printer.
+/// Reprints a kitchen ticket — on the hub's printer when this device has one to
+/// delegate to, otherwise on its own.
 Future<void> printKotNow(
   BuildContext context,
   WidgetRef ref, {
   required Map<String, dynamic> kot,
 }) async {
   final messenger = ScaffoldMessenger.of(context);
+
+  if (_delegatesPrinting(ref)) {
+    final lan = ref.read(lanConfigProvider);
+    final label = (kot['kotNumber'] ?? kot['kot_number'] ?? '').toString();
+    LanSync.instance.publish(LanMirror.printJobEnvelope(
+      deviceId: lan.deviceId,
+      branchId: ref.read(authNotifierProvider).value?.branchId ?? '',
+      role: LanPrintRole.kitchen,
+      // Unique per press. A reprint is something staff are entitled to ask for
+      // twice, so it must NOT dedup against the earlier one — while still
+      // covering a resend of this same press after a Wi-Fi blip.
+      jobId: 'reprint:${DateTime.now().microsecondsSinceEpoch}',
+      ticket: kot,
+    ));
+    _say(
+      messenger,
+      label.isEmpty
+          ? 'Sent to the kitchen printer at the counter.'
+          : 'KOT $label sent to the kitchen printer at the counter.',
+      AppColors.success,
+    );
+    return;
+  }
+
   final cfg = _readyPrinter(messenger, ref.read(kotPrinterConfigProvider),
       what: 'KOT printer');
   if (cfg == null) return;
@@ -102,56 +131,112 @@ Future<void> printKotNow(
   }
 }
 
-/// Prints [kot] straight to this device's kitchen (KOT) printer over the LAN,
-/// the moment a waiter taps "Send KOT to Kitchen". It's a direct socket to the
-/// printer's IP, so it needs no internet.
+/// True when this device should hand its tickets to the local hub rather than
+/// print them itself — i.e. it is a waiter's tablet with a hub answering.
 ///
-/// A silent no-op when this device has no KOT printer set up, when auto-print
-/// is off, or on web. Throws when the printer is configured but the send fails
-/// (off, out of paper, wrong IP) so the caller can tell the waiter.
+/// The hub (the cashier PC) owns both printers. A thermal print server holds
+/// one TCP session, so a floor of tablets each opening their own connection is
+/// what took the printers off the network mid-service.
+bool _delegatesPrinting(WidgetRef ref) {
+  final lan = ref.read(lanConfigProvider);
+  return lan.enabled &&
+      !lan.isHub &&
+      LanSync.instance.status.role == LanRole.client;
+}
+
+/// Puts [ticket] on paper: published to the hub when there is one, printed here
+/// when there isn't (this device IS the hub, LAN sync is off, or the hub is
+/// down mid-service).
+///
+/// Deliberately one or the other and never both. A published job is buffered
+/// and re-sent when the link returns, so also printing locally would put the
+/// same order on paper twice.
+///
+/// [jobId] is the dedup key — see [LanMirror.printJobEnvelope]. Stable for a
+/// ticket that must print exactly once; unique per press for a manual reprint,
+/// which the cashier is entitled to repeat.
+Future<void> _printTicket(
+  WidgetRef ref, {
+  required String role,
+  required String jobId,
+  required Map<String, dynamic> ticket,
+  required PrinterConfig localConfig,
+}) async {
+  if (_delegatesPrinting(ref)) {
+    final lan = ref.read(lanConfigProvider);
+    LanSync.instance.publish(LanMirror.printJobEnvelope(
+      deviceId: lan.deviceId,
+      branchId: ref.read(authNotifierProvider).value?.branchId ?? '',
+      role: role,
+      jobId: jobId,
+      ticket: ticket,
+    ));
+    return;
+  }
+
+  if (!thermalPrinter.supported || !localConfig.configured) return;
+  await thermalPrinter.printKotTicket(config: localConfig, kot: ticket);
+}
+
+/// Sends [kot]'s food items to the kitchen printer the moment a waiter taps
+/// "Send KOT to Kitchen" — over the LAN either way, so it needs no internet.
+///
+/// A silent no-op when auto-print is off on this device or the order has no
+/// food. Throws only on the local path, when this device's own printer is
+/// configured but the send fails (off, out of paper, wrong IP), so the caller
+/// can tell the waiter. Delegating never throws: the hub owns delivery from
+/// there, retries, and reports a ticket it could not print.
 Future<void> autoPrintKotToKitchen(
   WidgetRef ref, {
   required Kot kot,
   String? tableNumber,
 }) async {
-  if (!thermalPrinter.supported) return;
+  // The toggle stays a property of the device taking the order — it is the
+  // waiter's "should my orders print themselves?". Whether a printer exists is
+  // the printing device's problem, and when delegating that is the hub.
   final cfg = ref.read(kotPrinterConfigProvider);
-  if (!cfg.configured || !cfg.autoPrintKot) return;
+  if (!cfg.autoPrintKot) return;
 
   // Only kitchen (food) items belong on the kitchen ticket; bar/drink items are
   // printed at the cashier's bar printer instead. Skip if there's no food.
   final foodItems = kot.items.where((i) => !i.isBar).toList();
   if (foodItems.isEmpty) return;
 
-  await thermalPrinter.printKotTicket(
-    config: cfg,
-    kot: _kotPayload(kot, tableNumber, foodItems),
+  await _printTicket(
+    ref,
+    role: LanPrintRole.kitchen,
+    jobId: kot.id,
+    ticket: _kotPayload(kot, tableNumber, foodItems),
+    localConfig: cfg,
   );
 }
 
-/// Prints the BAR & DRINK items of [kot] straight to this device's receipt
-/// printer over the LAN, the moment a waiter sends the order — a direct socket
-/// to the printer's IP, so it needs no internet (same model as the kitchen
-/// print). The receipt printer is the cashier's LAN printer.
+/// Sends the BAR & DRINK items of [kot] to the receipt printer at the counter
+/// the moment a waiter sends the order — same model as the kitchen print, and
+/// equally independent of the internet.
 ///
-/// No-op when this device has no receipt printer set up, "auto-print bar
-/// orders" is off, the order has no bar/drink items, or on web. Throws when the
-/// printer is configured but unreachable so the caller can tell the waiter.
+/// No-op when "auto-print bar orders" is off on this device or the order has no
+/// bar/drink items. Throws only on the local path — see
+/// [autoPrintKotToKitchen].
 Future<void> autoPrintBarToCashier(
   WidgetRef ref, {
   required Kot kot,
   String? tableNumber,
 }) async {
-  if (!thermalPrinter.supported) return;
   final cfg = ref.read(receiptPrinterConfigProvider);
-  if (!cfg.configured || !cfg.autoPrintBarKot) return;
+  if (!cfg.autoPrintBarKot) return;
 
   final barItems = kot.items.where((i) => i.isBar).toList();
   if (barItems.isEmpty) return;
 
-  await thermalPrinter.printKotTicket(
-    config: cfg,
-    kot: _kotPayload(kot, tableNumber, barItems, title: 'BAR'),
+  await _printTicket(
+    ref,
+    role: LanPrintRole.receipt,
+    // Distinct from the kitchen half of the same order, which is a separate
+    // ticket on a separate printer and must not dedup against it.
+    jobId: '${kot.id}:bar',
+    ticket: _kotPayload(kot, tableNumber, barItems, title: 'BAR'),
+    localConfig: cfg,
   );
 }
 
@@ -210,8 +295,6 @@ Future<void> printCancellationTickets(
   required List<Map<String, dynamic>> items,
   String? cancelledBy,
 }) async {
-  if (!thermalPrinter.supported) return;
-
   bool isBar(Map<String, dynamic> i) {
     final t = (i['type'] as String?) ?? 'food';
     return t == 'bar' || t == 'drink';
@@ -242,17 +325,27 @@ Future<void> printCancellationTickets(
   final foodItems = items.where((i) => !isBar(i)).toList();
   final barItems = items.where(isBar).toList();
 
-  final kitchenCfg = ref.read(kotPrinterConfigProvider);
-  if (kitchenCfg.configured && foodItems.isNotEmpty) {
+  if (foodItems.isNotEmpty) {
     try {
-      await thermalPrinter.printKotTicket(config: kitchenCfg, kot: slip(foodItems));
+      await _printTicket(
+        ref,
+        role: LanPrintRole.kitchen,
+        jobId: 'cancel:$kotNumber',
+        ticket: slip(foodItems),
+        localConfig: ref.read(kotPrinterConfigProvider),
+      );
     } catch (_) {/* a cancel must not fail because the printer is offline */}
   }
 
-  final barCfg = ref.read(receiptPrinterConfigProvider);
-  if (barCfg.configured && barItems.isNotEmpty) {
+  if (barItems.isNotEmpty) {
     try {
-      await thermalPrinter.printKotTicket(config: barCfg, kot: slip(barItems, title: 'BAR'));
+      await _printTicket(
+        ref,
+        role: LanPrintRole.receipt,
+        jobId: 'cancel:$kotNumber:bar',
+        ticket: slip(barItems, title: 'BAR'),
+        localConfig: ref.read(receiptPrinterConfigProvider),
+      );
     } catch (_) {/* swallow — see above */}
   }
 }

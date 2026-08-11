@@ -129,6 +129,28 @@ class LanMirror {
         },
       );
 
+  /// A ticket for the hub to print, from a device that does not own a printer.
+  ///
+  /// [jobId] must be stable for the ticket it describes and unique across
+  /// tickets — it is the only thing standing between a resend after a Wi-Fi
+  /// blip and the kitchen cooking the same order twice. Key it on the KOT's id
+  /// plus what the slip is for, never on a timestamp.
+  static LanEnvelope printJobEnvelope({
+    required String deviceId,
+    required String branchId,
+    required String role,
+    required String jobId,
+    required Map<String, dynamic> ticket,
+  }) =>
+      LanEnvelope(
+        id: 'print:$role:$jobId',
+        branchId: branchId,
+        deviceId: deviceId,
+        kind: LanKind.printJob,
+        at: DateTime.now(),
+        data: {'role': role, 'ticket': ticket},
+      );
+
   // ── Incoming: apply an envelope locally ──────────────────────
 
   /// Writes [env] into this device's offline store. Returns true when local
@@ -150,6 +172,13 @@ class LanMirror {
           return await _applyKotVoid(env);
         case LanKind.kotItemVoid:
           return await _applyKotItemVoid(env);
+        case LanKind.printJob:
+          // Nothing to store — a print job is an instruction, not state.
+          // Returning true is what puts it on the `applied` stream, where the
+          // hub's print station picks it up (see lan_print_station.dart). On a
+          // device that is not the hub nothing is listening, and the hub never
+          // forwards these anyway.
+          return true;
         default:
           return false;
       }

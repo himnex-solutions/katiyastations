@@ -9,6 +9,7 @@ import '../../../../core/constants/app_constants.dart';
 import '../../../../core/lan/lan_config.dart';
 import '../../../../core/lan/lan_sync.dart';
 import '../../../../core/lan/lan_sync_provider.dart';
+import '../../../../core/printing/lan_print_station.dart';
 import '../../../../core/printing/printer_config.dart';
 import '../../../../core/printing/printer_status.dart';
 import '../../../../core/printing/printer_status_pill.dart';
@@ -428,6 +429,59 @@ class _LanSyncCardState extends ConsumerState<_LanSyncCard> {
         LanRole.disabled || LanRole.unsupported => AppColors.textHint,
       };
 
+  /// Where this device's tickets physically come out.
+  ///
+  /// Printing is owned by the hub on purpose: a thermal print server holds one
+  /// TCP session at a time, so five tablets each opening their own connection
+  /// is what used to take the printers off the network mid-service.
+  Widget _printingRow(bool isHub, LanPrintStationState station) {
+    final failed = isHub && station.failed > 0;
+    final color = failed ? AppColors.error : AppColors.success;
+    return Padding(
+      padding: const EdgeInsets.only(top: 14),
+      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Icon(failed ? Icons.print_disabled_rounded : Icons.print_rounded,
+            size: 18, color: color),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(
+              isHub
+                  ? 'This device prints for the whole floor'
+                  : 'Tickets print on the hub’s printers',
+              style: GoogleFonts.outfit(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.textPrimary),
+            ),
+            Text(
+              isHub
+                  ? _stationDetail(station)
+                  : 'Orders sent from here go to the cashier PC, which drives '
+                      'the kitchen and receipt printers.',
+              style: GoogleFonts.outfit(
+                  fontSize: 11.5,
+                  color: failed ? AppColors.error : AppColors.textSecondary,
+                  height: 1.35),
+            ),
+          ]),
+        ),
+      ]),
+    );
+  }
+
+  String _stationDetail(LanPrintStationState station) {
+    if (!station.active) {
+      return 'Set up the kitchen and receipt printers on this device — the '
+          'floor is relying on it to have them.';
+    }
+    final parts = <String>['${station.printed} ticket(s) printed'];
+    if (station.pending > 0) parts.add('${station.pending} waiting');
+    if (station.failed > 0) parts.add('${station.failed} failed');
+    final line = parts.join(' · ');
+    return station.lastError.isEmpty ? line : '$line — ${station.lastError}';
+  }
+
   @override
   Widget build(BuildContext context) {
     final cfg = ref.watch(lanConfigProvider);
@@ -509,6 +563,11 @@ class _LanSyncCardState extends ConsumerState<_LanSyncCard> {
           ),
         ]),
 
+        if (supported &&
+            cfg.enabled &&
+            (cfg.isHub || status.role == LanRole.client))
+          _printingRow(cfg.isHub, ref.watch(lanPrintStationProvider)),
+
         const Divider(height: 28),
 
         SwitchListTile(
@@ -569,8 +628,11 @@ class _LanSyncCardState extends ConsumerState<_LanSyncCard> {
           Align(
             alignment: Alignment.centerLeft,
             child: Text(
-              'Leave empty to find the hub automatically. Fill it in only if '
-              'auto-detect fails — some networks block the broadcast it uses.',
+              'The cashier PC\'s address on the shop network. Devices dial it '
+              'directly, so they connect instantly and keep working on networks '
+              'that block the auto-detect broadcast. Change it only if the '
+              'cashier PC moves to a different IP; leave it empty to search for '
+              'the hub automatically instead.',
               style: GoogleFonts.outfit(
                   fontSize: 11, color: AppColors.textSecondary, height: 1.3),
             ),
@@ -584,7 +646,7 @@ class _LanSyncCardState extends ConsumerState<_LanSyncCard> {
                 style: GoogleFonts.outfit(fontSize: 13, color: AppColors.textPrimary),
                 decoration: InputDecoration(
                   isDense: true,
-                  hintText: 'e.g. 192.168.1.40 (auto)',
+                  hintText: 'e.g. $kDefaultHubHost (empty = auto-detect)',
                   hintStyle: GoogleFonts.outfit(fontSize: 13, color: AppColors.textHint),
                   border: const OutlineInputBorder(),
                 ),

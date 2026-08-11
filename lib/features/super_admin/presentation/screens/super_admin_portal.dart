@@ -16,6 +16,7 @@ import '../../../../core/utils/date_time_utils.dart';
 import '../../../../core/utils/responsive_utils.dart';
 import '../../../../core/widgets/reset_password_dialog.dart';
 import '../../../../core/widgets/notification_bell.dart';
+import '../../../../core/widgets/purge_payments_dialog.dart';
 
 final allUsersProvider = FutureProvider<List<Map<String, dynamic>>>((ref) async {
   final response = await ApiClient.instance.get(
@@ -1192,6 +1193,40 @@ class _SystemTab extends ConsumerStatefulWidget {
 class _SystemTabState extends ConsumerState<_SystemTab> {
   bool _busy = false;
 
+  /// Which branch a payment purge applies to. The server refuses a purge that
+  /// does not name exactly one — a super admin's token carries no branch, so
+  /// "all of them" would otherwise be the silent default.
+  String? _purgeBranchId;
+
+  /// Permanently deletes a date range of payment records for one branch.
+  ///
+  /// This is the one place the super admin touches financial data. Billing is
+  /// @BlockSuperAdmin() on the server for everything else; these two routes are
+  /// opened deliberately so the account that already owns backup, restore and
+  /// the factory reset can also clear a bad day without a manager present.
+  Future<void> _purgePayments(List<Map<String, dynamic>> branches) async {
+    final branch = branches.firstWhere(
+      (b) => b['id'] == _purgeBranchId,
+      orElse: () => const {},
+    );
+    if (branch.isEmpty) return;
+    final messenger = ScaffoldMessenger.of(context);
+
+    final deleted = await showPurgePaymentsDialog(
+      context,
+      branchId: _purgeBranchId!,
+      branchLabel: (branch['name'] ?? '').toString(),
+    );
+    if (deleted == null || !mounted) return;
+
+    messenger.showSnackBar(SnackBar(
+      backgroundColor: AppColors.success,
+      duration: const Duration(seconds: 6),
+      content: Text('$deleted payment record(s) deleted permanently from '
+          '${branch['name']}.'),
+    ));
+  }
+
   Future<void> _factoryReset() async {
     final confirmed = await _confirmReset();
     if (confirmed != true || !mounted) return;
@@ -1334,8 +1369,94 @@ class _SystemTabState extends ConsumerState<_SystemTab> {
               ),
             ]),
           ),
+          const SizedBox(height: 20),
+          _purgeCard(),
         ],
       ),
+    );
+  }
+
+  /// Targeted alternative to the factory reset: clears the payment records for
+  /// a chosen branch and date range, leaving menu, staff, tables and stock
+  /// alone. What it removes is shown and counted before anything happens.
+  Widget _purgeCard() {
+    final branchesAsync = ref.watch(allBranchesProvider);
+
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: AppColors.error.withValues(alpha: 0.05),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppColors.error.withValues(alpha: 0.3)),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          const Icon(Icons.delete_sweep_rounded, color: AppColors.error),
+          const SizedBox(width: 10),
+          Text('Delete Payment Records by Date',
+              style: GoogleFonts.outfit(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
+                  color: AppColors.error)),
+        ]),
+        const SizedBox(height: 12),
+        Text(
+          'Permanently removes FULLY PAID bills and their payments for one '
+          'branch over a date range — the last day, week, month or six months. '
+          'Bills on credit (udhaaro), part-paid bills and anything refunded or '
+          'voided are never touched, and neither are orders, menu, staff, '
+          'tables or stock.\n\n'
+          'Revenue reports for those days will read zero afterwards. An audit '
+          'entry recording every bill removed, and who removed it, is kept. '
+          'This cannot be undone.',
+          style: GoogleFonts.outfit(
+              fontSize: 13, color: AppColors.textSecondary, height: 1.45),
+        ),
+        const SizedBox(height: 18),
+        branchesAsync.when(
+          loading: () => const SizedBox(
+              height: 20,
+              width: 20,
+              child: CircularProgressIndicator(strokeWidth: 2)),
+          error: (e, _) => Text('Could not load branches: $e',
+              style: GoogleFonts.outfit(fontSize: 12, color: AppColors.error)),
+          data: (branches) => Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              DropdownButtonFormField<String>(
+                initialValue: _purgeBranchId,
+                isExpanded: true,
+                decoration: const InputDecoration(
+                  labelText: 'Branch',
+                  isDense: true,
+                  border: OutlineInputBorder(),
+                ),
+                items: [
+                  for (final branch in branches)
+                    DropdownMenuItem(
+                      value: branch['id'] as String,
+                      child: Text((branch['name'] ?? '').toString()),
+                    ),
+                ],
+                onChanged: (v) => setState(() => _purgeBranchId = v),
+              ),
+              const SizedBox(height: 14),
+              ElevatedButton.icon(
+                onPressed: _purgeBranchId == null
+                    ? null
+                    : () => _purgePayments(branches),
+                style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.error,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 18, vertical: 14)),
+                icon: const Icon(Icons.delete_forever_rounded, size: 18),
+                label: const Text('Choose dates and delete…'),
+              ),
+            ],
+          ),
+        ),
+      ]),
     );
   }
 }

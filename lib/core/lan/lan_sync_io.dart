@@ -48,6 +48,11 @@ const Duration _kPeerTimeout = Duration(seconds: 90);
 const Duration _kConnectTimeout = Duration(seconds: 5);
 const Duration _kDiscoveryTimeout = Duration(seconds: 2);
 
+/// Failed attempts against a pinned hub address before falling back to a
+/// broadcast. Three covers a hub that is rebooting or a Wi-Fi drop (2s, 4s, 8s
+/// of retries) without spending a discovery window on every one of them.
+const int _kPinnedHostAttempts = 3;
+
 class NativeLanSync implements LanSync {
   final _statusCtrl = StreamController<LanStatus>.broadcast();
   final _appliedCtrl = StreamController<LanEnvelope>.broadcast();
@@ -431,6 +436,18 @@ class NativeLanSync implements LanSync {
   Future<void> _ingest(LanEnvelope env) async {
     if (!_seenIds.add(env.id)) return;
 
+    // A print job is an instruction to THIS device's printers, not shared
+    // state. It takes no seq, never enters the log and is never forwarded:
+    // a catching-up client replaying one, or a peer receiving a copy, would
+    // print the same order again. In-run duplicates are absorbed by _seenIds
+    // above; duplicates across a hub restart — when _seenIds starts empty and
+    // a client resends what it published in the last few minutes — are caught
+    // by the print station's own persisted record of what it has printed.
+    if (env.kind == LanKind.printJob) {
+      await _applyAndEmit(env);
+      return;
+    }
+
     _headSeq += 1;
     final stamped = env.withSeq(_headSeq);
     _log.add(stamped);
@@ -484,8 +501,28 @@ class NativeLanSync implements LanSync {
     }
   }
 
+  /// Where to dial the hub.
+  ///
+  /// A pinned address wins — that is the whole point of pinning, and it makes a
+  /// reconnect a single TCP connect instead of a broadcast, a 2s discovery
+  /// window and then a connect. On a network that drops broadcasts (AP/client
+  /// isolation is common on cheap routers) it is the only thing that works at
+  /// all.
+  ///
+  /// Discovery stays as the self-healing path: after [_kPinnedHostAttempts]
+  /// consecutive failures the cashier PC has plausibly moved to a different
+  /// IP, so broadcast for it rather than dial a dead address all night.
+  /// [_backoffStep] is reset by a successful connect, so a hub that is merely
+  /// rebooting never reaches the fallback.
+  Future<String?> _resolveHost(LanConfig cfg) async {
+    final pinned = cfg.manualHost.trim();
+    if (pinned.isEmpty) return _discoverHub();
+    if (_backoffStep < _kPinnedHostAttempts) return pinned;
+    return await _discoverHub() ?? pinned;
+  }
+
   Future<void> _attemptConnect(LanConfig cfg, int epoch) async {
-    final host = cfg.hasManualHost ? cfg.manualHost.trim() : await _discoverHub();
+    final host = await _resolveHost(cfg);
     if (_stopping || epoch != _epoch) return;
 
     if (host == null) {

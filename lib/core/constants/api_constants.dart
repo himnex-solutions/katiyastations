@@ -94,6 +94,14 @@ class ApiConstants {
   static String addBillPayment(String id) => '/billing/bills/$id/payments';
   static const String paymentHistory = '/billing/payment-history';
 
+  /// Counts and totals for a date window, so a purge can be read before it is
+  /// run. Open to branch managers and the super admin.
+  static const String paymentRecordsPurgePreview =
+      '/billing/payment-records/purge-preview';
+
+  /// DELETE with the window plus `confirm: 'DELETE'`. Irreversible.
+  static const String paymentRecordsPurge = '/billing/payment-records';
+
   // ── Credit (Udhaaro) Endpoints ─────────────────────────────
   static const String credits = '/credit';
   static String creditById(String id) => '/credit/$id';

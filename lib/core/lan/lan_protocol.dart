@@ -34,6 +34,19 @@ const int kLanProtocolVersion = 1;
 /// TCP port the hub's HTTP/WebSocket server listens on.
 const int kLanHubPort = 8787;
 
+/// The cashier PC's address on the restaurant's network.
+///
+/// It holds a DHCP reservation for this IP, so every tablet can go straight to
+/// the hub instead of broadcasting for it. Pinning matters for more than speed:
+/// UDP discovery is the part of the link that fails on networks with AP/client
+/// isolation, and it is the reason a tablet can sit on "Looking for hub…" while
+/// the hub is running perfectly well two metres away.
+///
+/// Overridable per device in Settings → Local hub. Discovery is still the
+/// fallback if this address stops answering, so moving the cashier PC does not
+/// strand the floor — see NativeLanSync._resolveHost.
+const String kDefaultHubHost = '192.168.16.21';
+
 /// UDP port used for hub discovery broadcasts.
 const int kLanDiscoveryPort = 8788;
 
@@ -68,7 +81,41 @@ class LanKind {
   /// cancelled line in place.
   static const String kotItemVoid = 'kot_item_void';
 
-  static const List<String> all = [session, kot, bill, kotVoid, kotItemVoid];
+  /// A ticket to put on paper. Payload is `{role, ticket}`.
+  ///
+  /// Unlike every other kind this is an INSTRUCTION, not state: the hub acts on
+  /// it and stores nothing. It is therefore never logged, never replayed to a
+  /// catching-up client and never fanned out to peers — all three would put the
+  /// same order on paper a second time. See LanKind.printJob handling in
+  /// lan_sync_io.dart's _ingest.
+  static const String printJob = 'print_job';
+
+  static const List<String> all = [
+    session,
+    kot,
+    bill,
+    kotVoid,
+    kotItemVoid,
+    printJob,
+  ];
+}
+
+/// Which of the hub's printers a [LanKind.printJob] is for.
+///
+/// A device names the ROLE, never an address. The hub resolves it against its
+/// own printer setup, so the printers' IPs live in exactly one place instead of
+/// being copied onto every tablet — and only one device ever opens a socket to
+/// them, which is the whole point of routing printing through the hub.
+class LanPrintRole {
+  LanPrintRole._();
+
+  /// The kitchen's KOT printer — food items.
+  static const String kitchen = 'kitchen';
+
+  /// The till's receipt printer, which also prints the bar/drink tickets.
+  static const String receipt = 'receipt';
+
+  static const List<String> all = [kitchen, receipt];
 }
 
 /// One replicated mutation travelling over the LAN.

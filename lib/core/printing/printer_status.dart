@@ -9,6 +9,7 @@
 // ============================================================
 
 import 'dart:async';
+import 'dart:math';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -16,16 +17,40 @@ import 'printer_config.dart';
 import 'thermal_printer.dart';
 
 /// Bluetooth is the odd one out: probing it means running a discovery scan,
-/// which spins the radio for several seconds. Poll it far less often than a
-/// TCP connect or a USB device enumeration, both of which are near-free.
-const Duration _scanPollInterval = Duration(seconds: 30);
-const Duration _cheapPollInterval = Duration(seconds: 10);
+/// which spins the radio for several seconds.
+const Duration _scanPollInterval = Duration(seconds: 60);
+
+/// A network or USB probe is cheap for *this* device but not for the printer:
+/// a TCP probe costs one of the very few session slots an ESC/POS print server
+/// has. This used to be 10 seconds, which across a floor of tablets kept those
+/// slots permanently occupied and made the printers unreachable mid-service.
+/// Slow enough to leave the printer alone, quick enough that a cashier who
+/// plugs one back in sees it — and there is a "Re-check" button for impatience.
+const Duration _cheapPollInterval = Duration(seconds: 60);
+
+/// Added to each notifier's interval, drawn once per notifier. Several devices
+/// showing a printer card at the same time otherwise settle into lockstep and
+/// hit the printer on the same second, every minute.
+const int _maxJitterMs = 5000;
 
 class PrinterStatusNotifier extends StateNotifier<PrinterProbe> {
   final Ref _ref;
   final StateNotifierProvider<PrinterConfigNotifier, PrinterConfig> _configProvider;
   Timer? _timer;
   bool _probing = false;
+
+  /// Bumped by every [_restart]. A `_probeThenSchedule` from an earlier
+  /// generation finds its number stale and declines to install its timer.
+  ///
+  /// Without this the poll rate silently multiplies: `_restart` cancels the
+  /// timer and then *awaits* a probe before installing the next one, so two
+  /// restarts landing together — the config's async load finishing while a save
+  /// arrives — each install a `Timer.periodic`, and the later assignment
+  /// orphans the earlier one. The orphan keeps polling for the life of the app
+  /// and isn't cancelled by [dispose], which only knows about `_timer`.
+  int _generation = 0;
+
+  final int _jitterMs = Random().nextInt(_maxJitterMs);
 
   PrinterStatusNotifier(this._ref, this._configProvider)
       : super(PrinterProbe.checking()) {
@@ -44,19 +69,26 @@ class PrinterStatusNotifier extends StateNotifier<PrinterProbe> {
   void _restart() {
     _timer?.cancel();
     _timer = null;
-    unawaited(_probeThenSchedule());
+    unawaited(_probeThenSchedule(++_generation));
   }
 
-  Future<void> _probeThenSchedule() async {
+  Future<void> _probeThenSchedule(int generation) async {
     await _probe();
     // Nothing to poll for when no printer is saved, or when this platform
     // (web) or transport (Bluetooth on Windows) can't be probed at all.
     if (!mounted || !state.isPollable) return;
+    // A newer restart has taken over while this probe was in flight; it owns
+    // the timer now.
+    if (generation != _generation) return;
 
     final interval = state.kind == PrinterKind.bluetooth
         ? _scanPollInterval
         : _cheapPollInterval;
-    _timer = Timer.periodic(interval, (_) => _probe());
+    _timer?.cancel();
+    _timer = Timer.periodic(
+      interval + Duration(milliseconds: _jitterMs),
+      (_) => _probe(),
+    );
   }
 
   Future<void> _probe() async {
