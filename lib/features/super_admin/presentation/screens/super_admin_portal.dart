@@ -1424,7 +1424,10 @@ class _SystemTabState extends ConsumerState<_SystemTab> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               DropdownButtonFormField<String>(
-                initialValue: _purgeBranchId,
+                // `value`, not `initialValue`: the web CI builds on Flutter
+                // 3.32.0, where the renamed parameter does not exist yet. See
+                // the ignore_for_file at the top of this file.
+                value: _purgeBranchId,
                 isExpanded: true,
                 decoration: const InputDecoration(
                   labelText: 'Branch',
