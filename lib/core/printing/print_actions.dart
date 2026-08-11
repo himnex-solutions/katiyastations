@@ -174,28 +174,51 @@ Future<void> _printTicket(
     return;
   }
 
-  if (!thermalPrinter.supported || !localConfig.configured) return;
+  // Web and other platforms that cannot drive a printer stay silent — there is
+  // nothing the person holding the device could do about it.
+  if (!thermalPrinter.supported) return;
+
+  // But a device that CAN print, with no hub answering and no printer of its
+  // own, has nowhere to send this ticket. Saying so is the whole point: the
+  // waiter walks away believing the kitchen has the order, and the silent
+  // return this replaces is how a table waits an hour for food nobody is
+  // cooking.
+  if (!localConfig.configured) {
+    throw StateError(
+      'Nowhere to print this ticket: the counter PC is not reachable and no '
+      'printer is set up on this device.',
+    );
+  }
+
   await thermalPrinter.printKotTicket(config: localConfig, kot: ticket);
 }
 
 /// Sends [kot]'s food items to the kitchen printer the moment a waiter taps
 /// "Send KOT to Kitchen" — over the LAN either way, so it needs no internet.
 ///
-/// A silent no-op when auto-print is off on this device or the order has no
-/// food. Throws only on the local path, when this device's own printer is
-/// configured but the send fails (off, out of paper, wrong IP), so the caller
-/// can tell the waiter. Delegating never throws: the hub owns delivery from
+/// A silent no-op when the order has no food, or when this device prints
+/// locally and has auto-print switched off.
+///
+/// Throws on the local path when the send fails (printer off, out of paper,
+/// wrong IP) AND when there is nowhere to print at all, so the caller can tell
+/// the waiter either way. Delegating never throws: the hub owns delivery from
 /// there, retries, and reports a ticket it could not print.
 Future<void> autoPrintKotToKitchen(
   WidgetRef ref, {
   required Kot kot,
   String? tableNumber,
 }) async {
-  // The toggle stays a property of the device taking the order — it is the
-  // waiter's "should my orders print themselves?". Whether a printer exists is
-  // the printing device's problem, and when delegating that is the hub.
+  // "Auto-print KOT" answers "does THIS device drive a kitchen printer by
+  // itself", so it governs the local path only.
+  //
+  // It cannot govern the delegated one: a tablet that hands its tickets to the
+  // hub has no printer, Settings greys the switch out because there is nothing
+  // to configure, and the saved value therefore stays false forever. Gating on
+  // it meant a tablet without a printer printed nothing at all — the exact
+  // setup this feature exists to support.
   final cfg = ref.read(kotPrinterConfigProvider);
-  if (!cfg.autoPrintKot) return;
+  final delegates = _delegatesPrinting(ref);
+  if (!delegates && !cfg.autoPrintKot) return;
 
   // Only kitchen (food) items belong on the kitchen ticket; bar/drink items are
   // printed at the cashier's bar printer instead. Skip if there's no food.
@@ -215,16 +238,17 @@ Future<void> autoPrintKotToKitchen(
 /// the moment a waiter sends the order — same model as the kitchen print, and
 /// equally independent of the internet.
 ///
-/// No-op when "auto-print bar orders" is off on this device or the order has no
-/// bar/drink items. Throws only on the local path — see
+/// No-op when the order has no bar/drink items, or when this device prints
+/// locally and "auto-print bar orders" is off. Throws on the local path — see
 /// [autoPrintKotToKitchen].
 Future<void> autoPrintBarToCashier(
   WidgetRef ref, {
   required Kot kot,
   String? tableNumber,
 }) async {
+  // Local path only, for the same reason as the kitchen toggle above.
   final cfg = ref.read(receiptPrinterConfigProvider);
-  if (!cfg.autoPrintBarKot) return;
+  if (!_delegatesPrinting(ref) && !cfg.autoPrintBarKot) return;
 
   final barItems = kot.items.where((i) => i.isBar).toList();
   if (barItems.isEmpty) return;

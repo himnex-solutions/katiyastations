@@ -1,6 +1,6 @@
 [Setup]
 AppName=KATIYA Station
-AppVersion=1.6.0
+AppVersion=1.7.1
 DefaultDirName={autopf}\KATIYA Station
 DefaultGroupName=KATIYA Station
 OutputDir=Output
